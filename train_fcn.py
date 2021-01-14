@@ -18,11 +18,7 @@ def train_fn(train_loader, model, criterion, optimizer, epoch, scheduler, device
     for step, (x_mb, labels) in enumerate(train_loader):
         # measure data loading time
         data_time.update(time.time() - end)
-        # img = torch.cat([x_mb, x_mb+mask_mb, mask_mb],dim=1)
-        # img = torch.cat([x_mb, x_mb, x_mb],dim=1)
         img = x_mb.to(device)
-        # x_mb = x_mb.to(device)
-        # mask_mb = mask_mb.to(device)
 
         labels = labels.to(device)
         batch_size = labels.size(0)
@@ -76,8 +72,7 @@ def train_fn_seg(train_loader, model, criterion, optimizer, epoch, scheduler, de
 
         model_out = model(img)
         loss = criterion["cls"](model_out["cls"], labels)
-        # seg_loss = criterion["seg"](model_out["seg_out"], mask_mb)
-        # loss = cls_loss
+
         # record loss
         losses.update(loss.item(), batch_size)
         optimizer.zero_grad()
@@ -118,6 +113,49 @@ def valid_fn(valid_loader, model, criterion, device):
         # img = torch.cat([x_mb, x_mb+mask_mb, mask_mb], dim=1)
         # img = torch.cat([x_mb, x_mb, x_mb], dim=1)
         img = x_mb.to(device)
+        labels = labels.to(device)
+        batch_size = labels.size(0)
+        # compute loss
+        with torch.no_grad():
+            # model_out = model(img)
+            # y_preds = model_out["cls"]
+            y_preds = model(img)
+        loss = criterion["cls"](y_preds, labels)
+        losses.update(loss.item(), batch_size)
+        # record accuracy
+        preds.append(y_preds.sigmoid().to("cpu").numpy())
+
+        # measure elapsed time
+        batch_time.update(time.time() - end)
+        end = time.time()
+        if step % 100 == 0 or step == (len(valid_loader) - 1):
+            print_str = (
+                f"EVAL: [{step}/{len(valid_loader)}] "
+                f"Data {data_time.val:.3f} ({data_time.avg:.3f}) "
+                f"Elapsed {timeSince(start, float(step+1)/len(valid_loader)):s} "
+                f"Loss: {losses.val:.4f}({losses.avg:.4f}) "
+            )
+            print(print_str)
+
+    predictions = np.concatenate(preds)
+    return losses.avg, predictions
+
+
+def valid_fn_seg(valid_loader, model, criterion, device):
+    batch_time = AverageMeter()
+    data_time = AverageMeter()
+    losses = AverageMeter()
+    # switch to evaluation mode
+    model.eval()
+    preds = []
+    start = end = time.time()
+    for step, (x_mb, mask_mb, labels) in enumerate(valid_loader):
+        # measure data loading time
+        data_time.update(time.time() - end)
+
+        img = torch.cat([x_mb, mask_mb[0], mask_mb[1]], dim=1)
+        img = img.to(device)
+
         labels = labels.to(device)
         batch_size = labels.size(0)
         # compute loss

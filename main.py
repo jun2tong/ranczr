@@ -8,9 +8,9 @@ import torch.nn as nn
 
 from dataset import TrainDataset, SegDataset, AnnotDataset, ValidDataset
 from torch.utils.data import DataLoader
-from train_fcn import train_fn, valid_fn, train_fn_seg
+from train_fcn import train_fn, valid_fn, train_fn_seg, valid_fn_seg
 from utils import get_score, init_logger
-from ranczr_models import CustomEffNet, CustomResNext
+from ranczr_models import CustomEffNet, CustomResNext, CustomXception
 from sklearn.model_selection import StratifiedKFold, GroupKFold, KFold
 
 import albumentations as a_transform
@@ -74,9 +74,11 @@ def train_loop(folds, fold):
         # model = SegModel(CFG.model_name, target_size=CFG.target_size)
     elif "efficient" in CFG.model_name:
         model = CustomEffNet(CFG.model_name, target_size=CFG.target_size)
+    elif "xception" in CFG.model_name:
+        model = CustomXception(None, target_size=CFG.target_size)
     else:
         model = CustomResNext(CFG.model_name, target_size=CFG.target_size)
-    # model = SegModel(CFG.backbone_name, target_size=CFG.target_size)
+
     model.to(device)
     if CFG.resume:
         check_point = torch.load(CFG.resume_path)
@@ -196,15 +198,15 @@ if __name__ == "__main__":
         num_workers = 4
         patience = 5
         segment_model = False
-        model_name = "efficientnet-b5"
+        model_name = "xception"
         backbone_name = "efficientnet-b5"
         resume = False
         resume_path = ""
         size = 512
         scheduler = "CosineAnnealingLR"
-        epochs = 30
-        T_max = 30
-        lr = 0.0005
+        epochs = 40
+        T_max = 40
+        lr = 0.001
         min_lr = 0.000001
         batch_size = 8
         weight_decay = 1e-6
@@ -227,18 +229,18 @@ if __name__ == "__main__":
             "Swan Ganz Catheter Present",
         ]
         n_fold = 4
-        trn_fold = [1, 2, 3]
+        trn_fold = [0]
         train = True
 
     # if CFG.debug:
     #     CFG.epochs = 1
     #     train = train.sample(n=100, random_state=CFG.seed).reset_index(drop=True)
 
-    normalize = a_transform.Normalize(
-        mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225], p=1.0, max_pixel_value=255.0,
-    )
-    # normalize = a_transform.Normalize(mean=[0.485],
-    #                                   std=[0.229], p=1.0, max_pixel_value=255.0)
+    # normalize = a_transform.Normalize(
+    #     mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225], p=1.0, max_pixel_value=255.0,
+    # )
+    normalize = a_transform.Normalize(mean=[0.485],
+                                      std=[0.229], p=1.0, max_pixel_value=255.0)
 
     train_transform = a_transform.Compose(
         [

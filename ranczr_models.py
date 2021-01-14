@@ -23,6 +23,21 @@ class CustomResNext(nn.Module):
         return x
 
 
+class CustomXception(nn.Module):
+    def __init__(self, pretrained_path, target_size=11):
+        super().__init__()
+        self.model = timm.models.xception(pretrained=True)
+        if pretrained_path:
+            checkpoint = torch.load(pretrained_path)
+            self.model.load_state_dict(checkpoint)
+        n_features = self.model.fc.in_features
+        self.model.fc = nn.Linear(n_features, target_size)
+
+    def forward(self, x):
+        x = self.model(x)
+        return x
+
+
 class CustomEffNet(nn.Module):
     def __init__(self, model_name, target_size=11):
         super().__init__()
