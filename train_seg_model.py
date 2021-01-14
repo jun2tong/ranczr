@@ -156,7 +156,7 @@ for epc in range(CFG.epochs):
 
         # Model prediction
         mask_pred = net(img_mb)
-        recon_loss = criterion_recon(mask_pred, mask_mb[0].to(device))
+        recon_loss = criterion_recon(mask_pred, mask_mb[1].to(device))
         batch_size = img_mb.size(0)
         # Record Loss
         losses.update(recon_loss.item(), batch_size)
@@ -178,7 +178,7 @@ for epc in range(CFG.epochs):
     # TODO: fix the reporting metric
     with torch.no_grad():
         for batch in valid_loader:
-            img_mb, mask_mb = batch[0].to(device), batch[1][0].to(device)
+            img_mb, mask_mb = batch[0].to(device), batch[1][1].to(device)
             prediction = net(img_mb)
             mse = criterion_recon(prediction, mask_mb)
             avg_valid.update(mse.item(), img_mb.size(0))
@@ -187,7 +187,7 @@ for epc in range(CFG.epochs):
             update_count = 0
             best_loss = avg_valid.avg
             print(f"Epoch {epc+1} - Save Best Loss: {best_loss:.4f} Model")
-            torch.save({"model": net.state_dict()}, f"seg-fcn8_best.pth")
+            torch.save({"model": net.state_dict()}, f"lung-seg-fcn8_best.pth")
         else:
             update_count += 1
             if update_count > CFG.patience:

@@ -43,8 +43,10 @@ def train_loop(folds, fold):
     # valid_dataset = AnnotDataset(WORKDIR, valid_folds, train_annot,
     #                            flip_transform=valid_transform,
     #                            target_cols=CFG.target_cols)
-    train_dataset = TrainDataset(WORKDIR, train_folds, transform=train_transform, target_cols=CFG.target_cols)
-    valid_dataset = ValidDataset(WORKDIR, valid_folds, transform=valid_transform, target_cols=CFG.target_cols)
+    train_dataset = SegDataset(WORKDIR, train_folds, flip_transform=train_transform, target_cols=CFG.target_cols)
+    valid_dataset = SegDataset(WORKDIR, valid_folds, flip_transform=valid_transform, target_cols=CFG.target_cols)
+    # train_dataset = TrainDataset(WORKDIR, train_folds, transform=train_transform, target_cols=CFG.target_cols)
+    # valid_dataset = ValidDataset(WORKDIR, valid_folds, transform=valid_transform, target_cols=CFG.target_cols)
 
     train_loader = DataLoader(
         train_dataset,
@@ -68,7 +70,8 @@ def train_loop(folds, fold):
     # ====================================================
     # model = CustomResNext(CFG.model_name, pretrained=True, target_size=CFG.target_size)
     if CFG.segment_model:
-        model = SegModel(CFG.model_name, target_size=CFG.target_size)
+        raise NotImplementedError("Segmentation model not implemented")
+        # model = SegModel(CFG.model_name, target_size=CFG.target_size)
     elif "efficient" in CFG.model_name:
         model = CustomEffNet(CFG.model_name, target_size=CFG.target_size)
     else:

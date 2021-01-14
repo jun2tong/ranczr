@@ -77,9 +77,8 @@ class SegDataset(Dataset):
         # self.norm_transform = norm_transform
         # self.img_path = os.path.join(self.root, "train")
         self.img_path = os.path.join(self.root, "train")
-        self.mask_path = os.path.join(self.root, "train_lung_masks")
-
-        self.clahe = cv2.createCLAHE(clipLimit=30.0, tileGridSize=(8, 8))
+        self.lung_mask_path = os.path.join(self.root, "train_lung_masks")
+        self.tube_mask_path = os.path.join(self.root, "train_tube_masks")
 
     def __len__(self):
         return len(self.img_idx)
@@ -87,41 +86,20 @@ class SegDataset(Dataset):
     def __getitem__(self, idx):
         file_name = self.img_idx[idx]
         img_path = f"{self.img_path}/{file_name}.jpg"
-        mask_path = f"{self.mask_path}/{file_name}.jpg"
+        lung_mask_path = os.path.join(self.lung_mask_path, f"{file_name}.jpg")
+        tube_mask_path = os.path.join(self.tube_mask_path, f"{file_name}.jpg")
 
         image = cv2.imread(img_path, cv2.IMREAD_GRAYSCALE)
-        image = self.clahe.apply(image)
-        image = self.reshape_img(image)
-        image = cv2.cvtColor(image, cv2.COLOR_GRAY2RGB)
-
-        img_mask = cv2.imread(mask_path, -1)
-        img_mask = self.reshape_img(img_mask)
-        img_mask = img_mask.astype(np.float32) / 255.0
-        # img_mask = cv2.cvtColor(img_mask, cv2.COLOR_BGR2RGB)
+        lung_mask = cv2.imread(lung_mask_path, -1)
+        tube_mask = cv2.imread(tube_mask_path, -1)
+        img_masks = np.zeros_like(image)
         if self.transform:
-            augmented = self.transform(image=image, mask=img_mask)
+            augmented = self.transform(image=image, masks=[tube_mask, lung_mask])
             image = augmented["image"]
-            img_mask = augmented["mask"]
+            img_masks = augmented["masks"]
 
         label = self.labels[idx]
-        return image, img_mask, label
-
-    def reshape_img(self, cl_img):
-        ht, wd = cl_img.shape
-        ww = max(ht + 2, wd + 2)
-        hh = ww
-        constant = np.zeros((hh, ww), dtype=np.uint8)
-        xx = (ww - wd) // 2
-        yy = (hh - ht) // 2
-        constant[yy : yy + ht, xx : xx + wd] = cl_img
-
-        target_area = 1024 * 1024
-        ratio = float(constant.shape[1]) / float(constant.shape[0])
-        new_h = int(np.sqrt(target_area / ratio) + 0.5)
-        new_w = int((new_h * ratio) + 0.5)
-
-        res_img = cv2.resize(constant, (new_w, new_h))
-        return res_img
+        return image, img_masks, label
 
 
 class AnnotDataset(Dataset):
