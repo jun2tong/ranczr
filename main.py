@@ -116,10 +116,10 @@ def train_loop(folds, fold):
 
         # train
         # avg_loss = train_fn_seg(train_loader, model, criterion, optimizer, epoch, scheduler, device)
-        avg_loss = train_fn(train_loader, model, criterion, optimizer, epoch, scheduler, device)
+        avg_loss = train_fn_seg(train_loader, model, criterion, optimizer, epoch, scheduler, device)
 
         # eval
-        avg_val_loss, preds = valid_fn(valid_loader, model, criterion, device)
+        avg_val_loss, preds = valid_fn_seg(valid_loader, model, criterion, device)
 
         # if isinstance(scheduler, torch.optim.lr_scheduler.ReduceLROnPlateau):
         #     scheduler.step(avg_val_loss)
@@ -198,7 +198,7 @@ if __name__ == "__main__":
         num_workers = 4
         patience = 5
         segment_model = False
-        model_name = "xception"
+        model_name = "efficientnet-b5"
         backbone_name = "efficientnet-b5"
         resume = False
         resume_path = ""
@@ -206,7 +206,7 @@ if __name__ == "__main__":
         scheduler = "CosineAnnealingLR"
         epochs = 40
         T_max = 40
-        lr = 0.001
+        lr = 0.0005
         min_lr = 0.000001
         batch_size = 8
         weight_decay = 1e-6
@@ -236,21 +236,20 @@ if __name__ == "__main__":
     #     CFG.epochs = 1
     #     train = train.sample(n=100, random_state=CFG.seed).reset_index(drop=True)
 
-    # normalize = a_transform.Normalize(
-    #     mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225], p=1.0, max_pixel_value=255.0,
-    # )
-    normalize = a_transform.Normalize(mean=[0.485],
-                                      std=[0.229], p=1.0, max_pixel_value=255.0)
+    normalize = a_transform.Normalize(
+        mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225], p=1.0, max_pixel_value=255.0,
+    )
+    # normalize = a_transform.Normalize(mean=[0.485], std=[0.229], p=1.0, max_pixel_value=255.0)
 
     train_transform = a_transform.Compose(
         [
             a_transform.RandomResizedCrop(CFG.size, CFG.size, scale=(0.9, 1.0), p=1),
             a_transform.HorizontalFlip(p=0.5),
-            a_transform.GaussianBlur(),
-            a_transform.CLAHE(clip_limit=(1, 4), p=0.5),
-            #    a_transform.Rotate(limit=30),
+            a_transform.OneOf([a_transform.GaussNoise(var_limit=[10, 50]), a_transform.GaussianBlur()], p=0.5),
+            a_transform.CLAHE(clip_limit=(1, 10), p=0.5),
+            # a_transform.Rotate(limit=30),
             #    a_transform.RandomBrightnessContrast(p=0.2, brightness_limit=(-0.2, 0.2), contrast_limit=(-0.2, 0.2)),
-            #    a_transform.HueSaturationValue(p=0.2, hue_shift_limit=0.2, sat_shift_limit=0.2, val_shift_limit=0.2),
+            a_transform.HueSaturationValue(p=0.5, hue_shift_limit=10, sat_shift_limit=10, val_shift_limit=10),
             a_transform.ShiftScaleRotate(p=0.5, shift_limit=0.0625, scale_limit=0.2, rotate_limit=30),
             #    a_transform.CoarseDropout(p=0.2),
             #    a_transform.Cutout(p=0.2, max_h_size=8, max_w_size=8, fill_value=(0., 0., 0.), num_holes=8),
@@ -270,7 +269,7 @@ if __name__ == "__main__":
 
     if not os.path.exists("./"):
         os.makedirs("./")
-    LOGGER = init_logger()
+    LOGGER = init_logger(f"{CFG.model_name}-fold{CFG.trn_fold[0]}.log")
 
     train_csv = pd.read_csv(os.path.join(WORKDIR, "train.csv"))
     weird_uid = "1.2.826.0.1.3680043.8.498.93345761486297843389996628528592497280"

@@ -90,16 +90,30 @@ class SegDataset(Dataset):
         tube_mask_path = os.path.join(self.tube_mask_path, f"{file_name}.jpg")
 
         image = cv2.imread(img_path, cv2.IMREAD_GRAYSCALE)
-        lung_mask = cv2.imread(lung_mask_path, -1)
-        tube_mask = cv2.imread(tube_mask_path, -1)
-        img_masks = np.zeros_like(image)
+        img = cv2.cvtColor(image, cv2.COLOR_GRAY2RGB)
+        # image = np.expand_dims(image, axis=2)
+        lung_mask = cv2.imread(lung_mask_path, cv2.IMREAD_GRAYSCALE)
+        mask = lung_mask > 0
+        lung_mask[mask] -= 100
+        # lung_mask = np.expand_dims(lung_mask, axis=2)
+
+        tube_mask = cv2.imread(tube_mask_path, cv2.IMREAD_GRAYSCALE)
+        mask = tube_mask > 100
+        tube_mask[mask] -= 50
+        # tube_mask = np.expand_dims(tube_mask, axis=2)
+
+        # img = np.concatenate([image, tube_mask, lung_mask], axis=2)
+        img[:, :, 1] += lung_mask
+        img[:, :, 0] += tube_mask
+
         if self.transform:
-            augmented = self.transform(image=image, masks=[tube_mask, lung_mask])
+            # augmented = self.transform(image=image, masks=[tube_mask, lung_mask])
+            augmented = self.transform(image=img)
             image = augmented["image"]
-            img_masks = augmented["masks"]
+            # img_masks = augmented["masks"]
 
         label = self.labels[idx]
-        return image, img_masks, label
+        return image, label
 
 
 class AnnotDataset(Dataset):

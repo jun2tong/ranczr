@@ -60,18 +60,18 @@ def train_fn_seg(train_loader, model, criterion, optimizer, epoch, scheduler, de
     model.train()
     start = end = time.time()
     global_step = 0
-    for step, (x_mb, mask_mb, labels) in enumerate(train_loader):
+    for step, (x_mb, labels) in enumerate(train_loader):
         # measure data loading time
         data_time.update(time.time() - end)
 
-        img = torch.cat([x_mb, mask_mb[0], mask_mb[1]], dim=1)
-        img = img.to(device)
+        # img = torch.cat([x_mb, mask_mb[0], mask_mb[1]], dim=1)
+        img = x_mb.to(device)
 
         labels = labels.to(device)
         batch_size = labels.size(0)
 
         model_out = model(img)
-        loss = criterion["cls"](model_out["cls"], labels)
+        loss = criterion["cls"](model_out, labels)
 
         # record loss
         losses.update(loss.item(), batch_size)
@@ -85,7 +85,7 @@ def train_fn_seg(train_loader, model, criterion, optimizer, epoch, scheduler, de
         batch_time.update(time.time() - end)
         end = time.time()
 
-        if step % 100 == 0 or step == (len(train_loader) - 1):
+        if step % 500 == 0 or step == (len(train_loader) - 1):
             print_str = (
                 f"Epoch: [{epoch+1}][{step}/{len(train_loader)}] "
                 f"Data {data_time.val:.3f} ({data_time.avg:.3f}) "
@@ -149,12 +149,12 @@ def valid_fn_seg(valid_loader, model, criterion, device):
     model.eval()
     preds = []
     start = end = time.time()
-    for step, (x_mb, mask_mb, labels) in enumerate(valid_loader):
+    for step, (x_mb, labels) in enumerate(valid_loader):
         # measure data loading time
         data_time.update(time.time() - end)
 
-        img = torch.cat([x_mb, mask_mb[0], mask_mb[1]], dim=1)
-        img = img.to(device)
+        # img = torch.cat([x_mb, mask_mb[0], mask_mb[1]], dim=1)
+        img = x_mb.to(device)
 
         labels = labels.to(device)
         batch_size = labels.size(0)
@@ -171,7 +171,7 @@ def valid_fn_seg(valid_loader, model, criterion, device):
         # measure elapsed time
         batch_time.update(time.time() - end)
         end = time.time()
-        if step % 100 == 0 or step == (len(valid_loader) - 1):
+        if step % 200 == 0 or step == (len(valid_loader) - 1):
             print_str = (
                 f"EVAL: [{step}/{len(valid_loader)}] "
                 f"Data {data_time.val:.3f} ({data_time.avg:.3f}) "
