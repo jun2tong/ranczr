@@ -97,7 +97,7 @@ train_transform = a_transform.Compose(
     p=1.0,
 )
 
-valid_transform = a_transform.Compose([a_transform.Resize(256, 256), normalize, ToTensorV2()], p=1.0)
+valid_transform = a_transform.Compose([a_transform.Resize(CFG.size, CFG.size), normalize, ToTensorV2()], p=1.0)
 
 
 # Select fold - loop curfold

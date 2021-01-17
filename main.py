@@ -10,6 +10,7 @@ from dataset import TrainDataset, SegDataset, AnnotDataset, ValidDataset
 from torch.utils.data import DataLoader
 from train_fcn import train_fn, valid_fn, train_fn_seg, valid_fn_seg
 from utils import get_score, init_logger
+from losses import FocalLoss
 from ranczr_models import CustomEffNet, CustomResNext, CustomXception
 from sklearn.model_selection import StratifiedKFold, GroupKFold, KFold
 
@@ -18,6 +19,7 @@ from albumentations.pytorch import ToTensorV2
 
 device = "cuda:0" if torch.cuda.is_available() else "cpu"
 WORKDIR = "../data/ranczr"
+# WORKDIR = "/home/jun/project/data/ranzcr-clip-catheter-line-classification"
 
 
 def train_loop(folds, fold):
@@ -85,9 +87,11 @@ def train_loop(folds, fold):
         model.load_state_dict(check_point["model"])
 
     optimizer = torch.optim.Adam(model.parameters(), lr=CFG.lr, weight_decay=CFG.weight_decay)
+    # optimizer = torch.optim.SGD(model.parameters(), lr=CFG.lr, momentum=0.9, weight_decay=CFG.weight_decay, nesterov=True)
     # CFG.T_max = int(CFG.epochs * len(train_loader))
-    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=CFG.T_max, eta_min=CFG.min_lr)
-
+    # scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=CFG.T_max, eta_min=CFG.min_lr)
+    scheduler = torch.optim.lr_scheduler.OneCycleLR(optimizer, CFG.lr, total_steps=CFG.epochs*len(train_loader), cycle_momentum=False, verbose=False)
+    # scheduler = torch.optim.lr_scheduler.OneCycleLR(optimizer, CFG.lr, total_steps=CFG.epochs*len(train_loader), cycle_momentum=True, verbose=False)
     # ====================================================
     # scheduler
     # ====================================================
@@ -104,7 +108,8 @@ def train_loop(folds, fold):
     # loop
     # ====================================================
     # criterion = nn.BCEWithLogitsLoss()
-    criterion = {"cls": nn.BCEWithLogitsLoss(), "seg": nn.BCEWithLogitsLoss()}
+    # criterion = {"cls": FocalLoss(alpha=1.5, logits=True), "seg": nn.BCEWithLogitsLoss()}
+    criterion = {"cls": FocalLoss(alpha=1.5, logits=True), "seg": nn.BCEWithLogitsLoss()}
 
     best_score = 0.0
     best_loss = np.inf
@@ -145,9 +150,7 @@ def train_loop(folds, fold):
             if score > best_score:
                 best_score = score
             LOGGER.info(f"Epoch {epoch+1} - Save Best Loss: {best_loss:.4f} Model")
-            torch.save(
-                {"model": model.state_dict(), "preds": preds}, f"{CFG.model_name}_fold{fold}_best.pth",
-            )
+            torch.save({"model": model.state_dict(), "preds": preds}, f"{CFG.model_name}_fold{fold}_best.pth")
         else:
             update_count += 1
             if update_count >= CFG.patience:
@@ -196,7 +199,7 @@ if __name__ == "__main__":
         debug = False
         print_freq = 100
         num_workers = 4
-        patience = 5
+        patience = 6
         segment_model = False
         model_name = "efficientnet-b5"
         backbone_name = "efficientnet-b5"
@@ -204,12 +207,12 @@ if __name__ == "__main__":
         resume_path = ""
         size = 512
         scheduler = "CosineAnnealingLR"
-        epochs = 40
-        T_max = 40
-        lr = 0.0005
+        epochs = 30
+        T_max = 30
+        lr = 0.001
         min_lr = 0.000001
         batch_size = 8
-        weight_decay = 1e-6
+        weight_decay = 1e-5
         # weight_decay=1e-6
         gradient_accumulation_steps = 1
         max_grad_norm = 1000
@@ -246,7 +249,7 @@ if __name__ == "__main__":
             a_transform.RandomResizedCrop(CFG.size, CFG.size, scale=(0.9, 1.0), p=1),
             a_transform.HorizontalFlip(p=0.5),
             a_transform.OneOf([a_transform.GaussNoise(var_limit=[10, 50]), a_transform.GaussianBlur()], p=0.5),
-            a_transform.CLAHE(clip_limit=(1, 10), p=0.5),
+            a_transform.CLAHE(clip_limit=(1, 4), p=0.5),
             # a_transform.Rotate(limit=30),
             #    a_transform.RandomBrightnessContrast(p=0.2, brightness_limit=(-0.2, 0.2), contrast_limit=(-0.2, 0.2)),
             a_transform.HueSaturationValue(p=0.5, hue_shift_limit=10, sat_shift_limit=10, val_shift_limit=10),

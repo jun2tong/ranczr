@@ -80,21 +80,21 @@ def train_fn_seg(train_loader, model, criterion, optimizer, epoch, scheduler, de
 
         grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), 1000)
         optimizer.step()
-
+        scheduler.step()
         # measure elapsed time
         batch_time.update(time.time() - end)
         end = time.time()
 
-        if step % 500 == 0 or step == (len(train_loader) - 1):
+        if step % 200 == 0 or step == (len(train_loader) - 1):
             print_str = (
                 f"Epoch: [{epoch+1}][{step}/{len(train_loader)}] "
                 f"Data {data_time.val:.3f} ({data_time.avg:.3f}) "
                 f"Elapsed {timeSince(start, float(step+1)/len(train_loader)):s} "
                 f"Loss: {losses.val:.4f}({losses.avg:.4f}) "  # f"Breakdown: {seg_loss.detach().item():.4f}({cls_loss.detach().item():.4f}) "
-                f"Grad: {grad_norm:.4f}"
+                f"Grad: {grad_norm:.4f} lr: {scheduler.get_last_lr()[0]:.6f}"
             )
             print(print_str)
-    scheduler.step()
+    # scheduler.step()
     return losses.avg
 
 
