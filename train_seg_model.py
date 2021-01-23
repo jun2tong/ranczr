@@ -114,7 +114,7 @@ def train_loop(folds, fold):
             print("Going into cosine regime.")
             scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=int(CFG.T_max * 0.6))
         # train
-        avg_loss = train_fn_seg(train_loader, model, criterion, optimizer, epoch, scheduler, device)
+        avg_loss, seg_loss, cls_loss = train_fn_seg(train_loader, model, criterion, optimizer, epoch, scheduler, device)
         # avg_loss = train_fn_seg(train_loader, model, criterion, optimizer, epoch, scheduler, device)
 
         # eval
@@ -127,7 +127,7 @@ def train_loop(folds, fold):
         elapsed = time.time() - start_time
 
         LOGGER.info(
-            f"Epoch {epoch+1} - avg_train_loss: {avg_loss:.4f}  avg_val_loss: {avg_val_loss:.4f}  time: {elapsed:.0f}s"
+            f"Epoch {epoch+1} - avg_train_loss: {avg_loss:.4f}  avg_val_loss: {avg_val_loss:.4f}  seg_loss: {seg_loss:.4f} cls_loss: {cls_loss:.4f} time: {elapsed:.0f}s"
         )
         LOGGER.info(f"Epoch {epoch+1} - Score: {score:.4f}  Scores: {np.round(scores, decimals=4)}")
 

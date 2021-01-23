@@ -93,7 +93,8 @@ def train_fn_seg(train_loader, model, criterion, optimizer, epoch, scheduler, de
                 f"Epoch: [{epoch+1}][{step}/{len(train_loader)}] "
                 f"Data {data_time.val:.3f} ({data_time.avg:.3f}) "
                 f"Elapsed {timeSince(start, float(step+1)/len(train_loader)):s} "
-                f"Loss: {losses.val:.4f}({losses.avg:.4f}) "  # f"Breakdown: {seg_loss.detach().item():.4f}({cls_loss.detach().item():.4f}) "
+                f"Loss: {losses.val:.4f}({losses.avg:.4f}) "  
+                f"Breakdown: [{seg_losses.val:.4f}][{cls_losses.val:.4f}) "
                 f"Grad: {grad_norm:.4f} lr: {scheduler.get_last_lr()[0]:.6f}"
             )
             print(print_str)
