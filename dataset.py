@@ -147,7 +147,7 @@ class AnnotDataset(Dataset):
         #     self.label_map[lab_name] = idx
         # self.label_map["lung"] = idx+1
         # self.label_map['background'] = idx+2
-        # self.clahe = cv2.createCLAHE(clipLimit=30.0, tileGridSize=(8, 8))
+        self.clahe = cv2.createCLAHE(clipLimit=30.0, tileGridSize=(8, 8))
 
     def __len__(self):
         return len(self.df)
@@ -156,6 +156,7 @@ class AnnotDataset(Dataset):
         uid = self.file_names[idx]
         file_path = f"{self.img_path}/{uid}.jpg"
         image = cv2.imread(file_path, cv2.IMREAD_GRAYSCALE)
+        image = self.clahe.apply(image)
         mask = np.zeros_like(image)
         image = cv2.cvtColor(image, cv2.COLOR_GRAY2RGB)
 
