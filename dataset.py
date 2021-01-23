@@ -8,6 +8,21 @@ from torch.utils.data import Dataset
 from utils import reshape_img, NeedleAugmentation
 
 
+COLOR_MAP = {
+    "ETT - Abnormal": (255, 0, 0),
+    "ETT - Borderline": (0, 255, 0),
+    "ETT - Normal": (0, 0, 255),
+    "NGT - Abnormal": (255, 255, 0),
+    "NGT - Borderline": (255, 0, 255),
+    "NGT - Incompletely Imaged": (0, 255, 255),
+    "NGT - Normal": (128, 0, 0),
+    "CVC - Abnormal": (0, 128, 0),
+    "CVC - Borderline": (0, 0, 128),
+    "CVC - Normal": (128, 128, 0),
+    "Swan Ganz Catheter Present": (128, 0, 128),
+}
+
+
 class TrainDataset(Dataset):
     def __init__(self, root, df, transform=None, target_cols=None):
         self.root = root
@@ -141,28 +156,32 @@ class AnnotDataset(Dataset):
         uid = self.file_names[idx]
         file_path = f"{self.img_path}/{uid}.jpg"
         image = cv2.imread(file_path, cv2.IMREAD_GRAYSCALE)
-        # image = self.clahe.apply(image)
-        # TODO: yet to reshape image
-        masks = [np.zeros_like(image) for _ in range(2)]
-        masks[1] = cv2.imread(f"{self.lung_mask_path}/{uid}.jpg", cv2.IMREAD_GRAYSCALE)
+        mask = np.zeros_like(image)
+        image = cv2.cvtColor(image, cv2.COLOR_GRAY2RGB)
+
+        # masks = [np.zeros_like(image) for _ in range(2)]
+        # masks[1] = cv2.imread(f"{self.lung_mask_path}/{uid}.jpg", cv2.IMREAD_GRAYSCALE)
+        has_mask = False
         query_string = f"StudyInstanceUID == '{uid}'"
         df = self.df_annotations.query(query_string)
-        image = cv2.cvtColor(image, cv2.COLOR_GRAY2RGB)
-        # image = image.astype(np.float32)
+        # TODO: check if empty
 
-        for _, row in df.iterrows():
-            # label = self.label_map[row["label"]]
-            data = ast.literal_eval(row["data"])
-            masks[0] = cv2.polylines(
-                masks[0], np.array([[np.array(x) for x in data]]), isClosed=False, color=(255,), thickness=10
-            )
+        if df.shape[0] > 0:
+            has_mask = True
+            for _, row in df.iterrows():
+                # label = self.label_map[row["label"]]
+                data = ast.literal_eval(row["data"])
+                ctr_cord = np.array([[np.array(x) for x in data]])
+                mask = cv2.polylines(mask, ctr_cord, isClosed=False, color=(255,), thickness=10)
+                image = cv2.polylines(image, ctr_cord, isClosed=False, color=COLOR_MAP[row["label"]], thickness=5)
 
         if self.transform:
-            augmented = self.transform(image=image, masks=masks)
-            tmasks = augmented["masks"]
+            augmented = self.transform(image=image, mask=mask)
+            mask = augmented["mask"]
             image = augmented["image"]
-            for ii, amask in enumerate(tmasks):
-                masks[ii] = torch.from_numpy(amask).unsqueeze(0).float() / 255.0
-            # masks = torch.from_numpy(np.concatenate(masks,axis=0)).float()
+        mask = mask.unsqueeze(0).float() / 255.0
+        # for ii, amask in enumerate(tmasks):
+        #     masks[ii] = torch.from_numpy(amask).unsqueeze(0).float() / 255.0
+        # mask = torch.from_numpy(np.concatenate(masks, axis=0)).float()
 
-        return image, masks, self.labels[idx]
+        return image, mask, self.labels[idx], has_mask
