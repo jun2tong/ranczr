@@ -6,13 +6,14 @@ import numpy as np
 import torch
 import torch.nn as nn
 
+
 from optimizer import Ranger
 from dataset import TrainDataset, SegDataset, AnnotDataset, ValidDataset
 from torch.utils.data import DataLoader
 from train_fcn import train_fn, valid_fn, train_fn_seg, valid_fn_seg
 from utils import get_score, init_logger
 from losses import FocalLoss
-from ranczr_models import CustomEffNet, CustomResNext, CustomXception, CustomInceptionV3
+from ranczr_models import CustomEffNet, CustomResNext, CustomXception, CustomInceptionV3, SMPModel
 from sklearn.model_selection import StratifiedKFold, GroupKFold, KFold
 
 import albumentations as a_transform
@@ -78,9 +79,17 @@ def train_loop(folds, fold):
     elif "efficient" in CFG.model_name:
         model = CustomEffNet(CFG.model_name, target_size=CFG.target_size)
     elif "xception" in CFG.model_name:
-        model = CustomXception(None, target_size=CFG.target_size)
+        model = CustomXception("pretrained_weights/xception-43020ad28.pth", target_size=CFG.target_size)
     elif "inception" in CFG.model_name:
         model = CustomInceptionV3(target_size=CFG.target_size)
+    elif "smp" in CFG.model_name:
+        aux_params = dict(pooling="avg",  # one of 'avg', 'max'
+                          dropout=None,  # dropout ratio, default is None
+                          activation=None,  # activation function, default is None
+                          classes=CFG.target_size,  # define number of output labels
+                          )
+        weight_dir = f"results/stage2/{CFG.backbone_name}_fold{fold}_S2_best.pth"
+        model = SMPModel(CFG.backbone_name, aux_params, weight_dir)
     else:
         model = CustomResNext(CFG.model_name, target_size=CFG.target_size)
 
@@ -113,7 +122,7 @@ def train_loop(folds, fold):
     # ====================================================
     # criterion = nn.BCEWithLogitsLoss()
     # criterion = {"cls": FocalLoss(alpha=1.5, logits=True), "seg": nn.BCEWithLogitsLoss()}
-    criterion = {"cls": FocalLoss(alpha=1.8, gamma=1.2, logits=True), "seg": nn.BCEWithLogitsLoss()}
+    criterion = {"cls": FocalLoss(alpha=1.2, gamma=1.2, logits=True), "seg": nn.BCEWithLogitsLoss()}
 
     best_score = 0.0
     best_loss = np.inf
@@ -130,7 +139,7 @@ def train_loop(folds, fold):
         # avg_loss = train_fn_seg(train_loader, model, criterion, optimizer, epoch, scheduler, device)
 
         # eval
-        avg_val_loss, preds = valid_fn(valid_loader, model, criterion, device)
+        avg_val_loss, preds = valid_fn(valid_loader, model, criterion["seg"], device)
         # avg_val_loss, preds = valid_fn_seg(valid_loader, model, criterion, device)
 
         # scoring
@@ -201,17 +210,17 @@ if __name__ == "__main__":
         num_workers = 4
         patience = 7
         segment_model = False
-        model_name = "BiT-M-R50x3"
-        backbone_name = "efficientnet-b5"
+        model_name = "inception"
+        backbone_name = "efficientnet-b2"
         resume = False
         resume_path = ""
         size = 512
         scheduler = "CosineAnnealingLR"
         epochs = 30
         T_max = 30
-        lr = 0.0005
+        lr = 0.001
         min_lr = 0.000001
-        batch_size = 8
+        batch_size = 16
         weight_decay = 1e-5
         gradient_accumulation_steps = 1
         max_grad_norm = 1000
@@ -230,7 +239,7 @@ if __name__ == "__main__":
             "CVC - Normal",
             "Swan Ganz Catheter Present",
         ]
-        n_fold = 4
+        n_fold = 5
         trn_fold = [0]
         train = True
 
@@ -254,9 +263,9 @@ if __name__ == "__main__":
             #    a_transform.RandomSnow(p=0.3),
             #    a_transform.RandomContrast(),
             #    a_transform.RGBShift(),
-            a_transform.OneOf(
-                [a_transform.JpegCompression(), a_transform.Downscale(scale_min=0.1, scale_max=0.15),], p=0.2,
-            ),
+            # a_transform.OneOf(
+            #     [a_transform.JpegCompression(), a_transform.Downscale(scale_min=0.1, scale_max=0.15),], p=0.2,
+            # ),
             normalize,
             ToTensorV2(),
         ],

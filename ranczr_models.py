@@ -11,6 +11,7 @@ from torchvision.models.segmentation.deeplabv3 import DeepLabHead
 from efficientnet_pytorch import EfficientNet
 from custom_mod.inception import inception_v3
 from custom_mod.bit_resnet import ResNetV2, get_weights
+import segmentation_models_pytorch as smp
 
 
 class CustomResNext(nn.Module):
@@ -34,7 +35,7 @@ class CustomResNext(nn.Module):
 class CustomXception(nn.Module):
     def __init__(self, pretrained_path, target_size=11):
         super().__init__()
-        self.model = timm.models.xception(pretrained=True)
+        self.model = timm.models.xception(pretrained=False)
         if pretrained_path:
             checkpoint = torch.load(pretrained_path)
             self.model.load_state_dict(checkpoint)
@@ -71,3 +72,14 @@ class CustomEffNet(nn.Module):
     def forward(self, image, targets=None):
         outputs = self.effnet(image)
         return outputs
+
+
+class SMPModel(nn.Module):
+    def __init__(self, model_name, aux_dict, weight_dir):
+        self.model = smp.Unet(model_name, classes=1, aux_params=aux_dict)
+        self.model.load_state_dict(torch.load(weight_dir)["model"])
+
+    def forward(self, x):
+        enc_out = self.model.encoder(x)
+        out = self.model.classification_head(enc_out[-1])
+        return out

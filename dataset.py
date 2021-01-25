@@ -3,6 +3,7 @@ import numpy as np
 import cv2
 import torch
 import ast
+import copy
 
 from torch.utils.data import Dataset
 from utils import reshape_img, NeedleAugmentation
@@ -62,7 +63,7 @@ class ValidDataset(Dataset):
         self.labels = torch.from_numpy(df[target_cols].values).float()
         self.transform = transform
         self.train_path = os.path.join(self.root, "train")
-        # self.clahe = cv2.createCLAHE(clipLimit=30.0, tileGridSize=(8, 8))
+        self.clahe = cv2.createCLAHE(clipLimit=30.0, tileGridSize=(8, 8))
 
     def __len__(self):
         return len(self.img_idx)
@@ -71,7 +72,7 @@ class ValidDataset(Dataset):
         file_name = self.img_idx[idx]
         file_path = f"{self.train_path}/{file_name}.jpg"
         image = cv2.imread(file_path, cv2.IMREAD_GRAYSCALE)
-        # image = self.clahe.apply(image)
+        image = self.clahe.apply(image)
         # image = reshape_img(image)
         image = cv2.cvtColor(image, cv2.COLOR_GRAY2RGB)
 
@@ -142,11 +143,6 @@ class AnnotDataset(Dataset):
         self.img_path = os.path.join(self.root, "train")
         self.lung_mask_path = os.path.join(self.root, "train_lung_masks")
 
-        # self.label_map = {}
-        # for idx, lab_name in enumerate(target_cols):
-        #     self.label_map[lab_name] = idx
-        # self.label_map["lung"] = idx+1
-        # self.label_map['background'] = idx+2
         self.clahe = cv2.createCLAHE(clipLimit=30.0, tileGridSize=(8, 8))
 
     def __len__(self):
@@ -165,7 +161,6 @@ class AnnotDataset(Dataset):
         has_mask = False
         query_string = f"StudyInstanceUID == '{uid}'"
         df = self.df_annotations.query(query_string)
-        # TODO: check if empty
 
         if df.shape[0] > 0:
             has_mask = True
@@ -186,3 +181,53 @@ class AnnotDataset(Dataset):
         # mask = torch.from_numpy(np.concatenate(masks, axis=0)).float()
 
         return image, mask, self.labels[idx], has_mask
+
+
+class AnnotDatasetS2(Dataset):
+    def __init__(self, root, df, df_annotations, flip_transform=None, target_cols=None):
+        self.root = root
+        self.df = df
+        self.df_annotations = df_annotations
+        self.file_names = df["StudyInstanceUID"].values
+        self.labels = torch.from_numpy(df[target_cols].values).float()
+        self.transform = flip_transform
+        self.img_path = os.path.join(self.root, "train")
+        self.tube_mask_path = os.path.join(self.root, "train_tube_masks")
+
+        self.clahe = cv2.createCLAHE(clipLimit=30.0, tileGridSize=(8, 8))
+
+    def __len__(self):
+        return len(self.df)
+
+    def __getitem__(self, idx):
+        uid = self.file_names[idx]
+        img_path = os.path.join(f"{self.img_path}",f"{uid}.jpg")
+        tube_mask_path = os.path.join(self.tube_mask_path, f"{uid}.jpg")
+
+        # read image and preprocess
+        image = cv2.imread(img_path, cv2.IMREAD_GRAYSCALE)
+        image = self.clahe.apply(image)
+        image = cv2.cvtColor(image, cv2.COLOR_GRAY2RGB)
+
+        # annot_image = image.copy()
+        # query_string = f"StudyInstanceUID == '{uid}'"
+        # df = self.df_annotations.query(query_string)
+
+        # if df.shape[0] > 0:
+        #     for _, row in df.iterrows():
+        #         data = ast.literal_eval(row["data"])
+        #         ctr_cord = np.array([[np.array(x) for x in data]])
+        #         mask = cv2.polylines(mask, ctr_cord, isClosed=False, color=(255,), thickness=10)
+        #         annot_image = cv2.polylines(annot_image, ctr_cord, isClosed=False, color=COLOR_MAP[row["label"]], thickness=5)
+
+        tube_mask = cv2.imread(tube_mask_path, cv2.IMREAD_GRAYSCALE)
+        mask = tube_mask < 100
+        tube_mask[mask] = 0
+        if self.transform:
+            augmented = self.transform(image=image, mask=tube_mask)
+            tube_mask = augmented['mask']
+            # annot_image = augmented["image_annot"]
+            image = augmented["image"]
+        tube_mask = tube_mask.unsqueeze(0).float() / 255.0
+
+        return image, tube_mask, self.labels[idx]
