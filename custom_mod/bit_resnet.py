@@ -22,6 +22,7 @@ from collections import OrderedDict  # pylint: disable=g-importing-member
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from custom_mod.attention import SimpleSelfAttention
 
 
 class StdConv2d(nn.Conv2d):
@@ -40,6 +41,10 @@ def conv1x1(cin, cout, stride=1, bias=False):
     return StdConv2d(cin, cout, kernel_size=1, stride=stride, padding=0, bias=bias)
 
 
+def noop(x):
+    return x
+
+
 def tf2th(conv_weights):
     """Possibly convert HWIO to OIHW."""
     if conv_weights.ndim == 4:
@@ -56,7 +61,7 @@ class PreActBottleneck(nn.Module):
   Except it puts the stride on 3x3 conv when available.
   """
 
-    def __init__(self, cin, cout=None, cmid=None, stride=1):
+    def __init__(self, cin, cout=None, cmid=None, stride=1, sa=False):
         super().__init__()
         cout = cout or cin
         cmid = cmid or cout // 4
@@ -68,6 +73,7 @@ class PreActBottleneck(nn.Module):
         self.gn3 = nn.GroupNorm(32, cmid)
         self.conv3 = conv1x1(cmid, cout)
         self.relu = nn.ReLU(inplace=True)
+        self.sa = SimpleSelfAttention(cout, ks=1, sym=False) if sa else noop
 
         if stride != 1 or cin != cout:
             # Projection also with pre-activation according to paper.
@@ -86,7 +92,7 @@ class PreActBottleneck(nn.Module):
         out = self.conv2(self.relu(self.gn2(out)))
         out = self.conv3(self.relu(self.gn3(out)))
 
-        return out + residual
+        return self.sa(out) + residual
 
     def load_from(self, weights, prefix=""):
         convname = "standardized_conv2d"
@@ -171,7 +177,15 @@ class ResNetV2(nn.Module):
                             OrderedDict(
                                 [("unit01", PreActBottleneck(cin=1024 * wf, cout=2048 * wf, cmid=512 * wf, stride=2))]
                                 + [
-                                    (f"unit{i:02d}", PreActBottleneck(cin=2048 * wf, cout=2048 * wf, cmid=512 * wf))
+                                    (
+                                        f"unit{i:02d}",
+                                        PreActBottleneck(
+                                            cin=2048 * wf,
+                                            cout=2048 * wf,
+                                            cmid=512 * wf,
+                                            sa=True if i == block_units[3] else False,
+                                        ),
+                                    )
                                     for i in range(2, block_units[3] + 1)
                                 ],
                             )

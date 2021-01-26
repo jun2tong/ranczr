@@ -28,7 +28,7 @@ def train_fn(train_loader, model, criterion, optimizer, epoch, scheduler, device
         #                                               targets_a, targets_b))
 
         y_preds = model(img)
-        loss = mixup_criterion(criterion["cls"], y_preds, targets_a, targets_b, lam)
+        loss = mixup_criterion(criterion["seg"], y_preds, targets_a, targets_b, lam)
         # loss = criterion["cls"](y_preds, labels)
         # record loss
         losses.update(loss.item(), batch_size)
@@ -37,7 +37,7 @@ def train_fn(train_loader, model, criterion, optimizer, epoch, scheduler, device
 
         grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), 1000)
         optimizer.step()
-        scheduler.step()
+        # scheduler.step()
 
         # measure elapsed time
         batch_time.update(time.time() - end)
@@ -52,7 +52,7 @@ def train_fn(train_loader, model, criterion, optimizer, epoch, scheduler, device
                 f"Grad: {grad_norm:.4f} lr: {scheduler.get_last_lr()[0]:.6f}"
             )
             print(print_str)
-    # scheduler.step()
+    scheduler.step()
     return losses.avg
 
 
@@ -97,7 +97,7 @@ def train_fn_seg(train_loader, model, criterion, optimizer, epoch, scheduler, de
                 f"Epoch: [{epoch+1}][{step}/{len(train_loader)}] "
                 f"Data {data_time.val:.3f} ({data_time.avg:.3f}) "
                 f"Elapsed {timeSince(start, float(step+1)/len(train_loader)):s} "
-                f"Loss: {losses.val:.4f}({losses.avg:.4f}) "  
+                f"Loss: {losses.val:.4f}({losses.avg:.4f}) "
                 f"Breakdown: [{seg_losses.val:.4f}][{cls_losses.val:.4f}] "
                 f"Grad: {grad_norm:.4f} lr: {scheduler.get_last_lr()[0]:.6f}"
             )
@@ -130,8 +130,8 @@ def train_fn_s2(train_loader, teacher, model, optimizer, epoch, scheduler, devic
         # features matching
         # with torch.no_grad():
         #     teacher_feas = teacher.encoder(ant_img_mb)[-1]
-            # _, teacher_feas = teacher(ant_img_mb)
-            # teacher_feas = torch.sigmoid(teacher_feas)
+        # _, teacher_feas = teacher(ant_img_mb)
+        # teacher_feas = torch.sigmoid(teacher_feas)
         # teach_loss = F.mse_loss(enc_out[-1], teacher_feas)
         seg_loss = F.binary_cross_entropy_with_logits(pred_mask, mask_mb.to(device))
         cls_loss = F.binary_cross_entropy_with_logits(pred_y, label_mb.to(device))
@@ -156,7 +156,7 @@ def train_fn_s2(train_loader, teacher, model, optimizer, epoch, scheduler, devic
                 f"Epoch: [{epoch+1}][{step}/{len(train_loader)}] "
                 f"Data {data_time.val:.3f} ({data_time.avg:.3f}) "
                 f"Elapsed {timeSince(start, float(step+1)/len(train_loader)):s} "
-                f"Loss: {losses.val:.4f}({losses.avg:.4f}) "  
+                f"Loss: {losses.val:.4f}({losses.avg:.4f}) "
                 f"Breakdown: [{feas_losses.val:.4f}][{cls_losses.val:.4f}] "
                 f"Grad: {grad_norm:.4f} lr: {scheduler.get_last_lr()[0]:.6f}"
             )
@@ -249,7 +249,7 @@ def valid_fn_seg(valid_loader, model, criterion, device):
 
 
 def mixup_data(x, y, alpha=1.0, device="cpu"):
-    '''Returns mixed inputs, pairs of targets, and lambda'''
+    """Returns mixed inputs, pairs of targets, and lambda"""
     if alpha > 0:
         lam = np.random.beta(alpha, alpha)
     else:

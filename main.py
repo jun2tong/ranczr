@@ -62,7 +62,7 @@ def train_loop(folds, fold):
     )
     valid_loader = DataLoader(
         valid_dataset,
-        batch_size=CFG.batch_size,
+        batch_size=CFG.batch_size * 2,
         shuffle=False,
         num_workers=CFG.num_workers,
         pin_memory=True,
@@ -83,11 +83,12 @@ def train_loop(folds, fold):
     elif "inception" in CFG.model_name:
         model = CustomInceptionV3(target_size=CFG.target_size)
     elif "smp" in CFG.model_name:
-        aux_params = dict(pooling="avg",  # one of 'avg', 'max'
-                          dropout=None,  # dropout ratio, default is None
-                          activation=None,  # activation function, default is None
-                          classes=CFG.target_size,  # define number of output labels
-                          )
+        aux_params = dict(
+            pooling="avg",  # one of 'avg', 'max'
+            dropout=None,  # dropout ratio, default is None
+            activation=None,  # activation function, default is None
+            classes=CFG.target_size,  # define number of output labels
+        )
         weight_dir = f"results/stage2/{CFG.backbone_name}_fold{fold}_S2_best.pth"
         model = SMPModel(CFG.backbone_name, aux_params, weight_dir)
     else:
@@ -101,8 +102,8 @@ def train_loop(folds, fold):
 
     # optimizer = torch.optim.Adam(model.parameters(), lr=CFG.lr, weight_decay=CFG.weight_decay)
     optimizer = Ranger(model.parameters(), lr=CFG.lr, weight_decay=CFG.weight_decay)
-    CFG.T_max = int(CFG.epochs * len(train_loader))
-    scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=int(CFG.T_max * 0.7), gamma=0.9)
+    step_var = int(CFG.epochs * CFG.sch_step[0])
+    scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=step_var, gamma=0.8)
     # scheduler1 = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=CFG.epochs//2)
 
     # ====================================================
@@ -122,18 +123,22 @@ def train_loop(folds, fold):
     # ====================================================
     # criterion = nn.BCEWithLogitsLoss()
     # criterion = {"cls": FocalLoss(alpha=1.5, logits=True), "seg": nn.BCEWithLogitsLoss()}
-    criterion = {"cls": FocalLoss(alpha=1.2, gamma=1.2, logits=True), "seg": nn.BCEWithLogitsLoss()}
+    criterion = {"cls": nn.BCEWithLogitsLoss(), "seg": nn.BCEWithLogitsLoss()}
 
     best_score = 0.0
     best_loss = np.inf
     update_count = 0
     to_save = False
+    change_point = int(CFG.epochs * np.sum(CFG.sch_step[:-1]))
+    rem_step = int(CFG.epochs * (1.0 - np.sum(CFG.sch_step[:-1]))) + 1
+    LOGGER.info(f"Change point: {change_point} Rem Steps: {rem_step}")
     for epoch in range(CFG.epochs):
 
         start_time = time.time()
-        if (epoch + 1) == int(CFG.epochs * 0.7):
-            print("Going into cosine regime.")
-            scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=int(CFG.T_max * 0.3))
+        if epoch == change_point:
+            print(f"Going into cosine regime with {rem_step} steps")
+            optimizer.param_groups[0]["lr"] = scheduler.get_last_lr()[0]
+            scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=rem_step, eta_min=CFG.min_lr)
         # train
         avg_loss = train_fn(train_loader, model, criterion, optimizer, epoch, scheduler, device)
         # avg_loss = train_fn_seg(train_loader, model, criterion, optimizer, epoch, scheduler, device)
@@ -210,17 +215,17 @@ if __name__ == "__main__":
         num_workers = 4
         patience = 7
         segment_model = False
-        model_name = "inception"
+        model_name = "ecaR50_pruned"
         backbone_name = "efficientnet-b2"
         resume = False
         resume_path = ""
-        size = 512
+        size = 1024
         scheduler = "CosineAnnealingLR"
         epochs = 30
-        T_max = 30
+        sch_step = [0.4, 0.4, 0.2]
         lr = 0.001
-        min_lr = 0.000001
-        batch_size = 16
+        min_lr = 0.000002
+        batch_size = 32
         weight_decay = 1e-5
         gradient_accumulation_steps = 1
         max_grad_norm = 1000
@@ -253,7 +258,7 @@ if __name__ == "__main__":
             a_transform.RandomResizedCrop(CFG.size, CFG.size, scale=(0.9, 1.0), p=1),
             a_transform.HorizontalFlip(p=0.5),
             a_transform.OneOf([a_transform.GaussNoise(var_limit=[10, 50]), a_transform.GaussianBlur()], p=0.5),
-            a_transform.CLAHE(clip_limit=(1, 10), p=0.5),
+            # a_transform.CLAHE(clip_limit=(1, 10), p=0.5),
             # a_transform.Rotate(limit=30),
             #    a_transform.RandomBrightnessContrast(p=0.2, brightness_limit=(-0.2, 0.2), contrast_limit=(-0.2, 0.2)),
             a_transform.HueSaturationValue(p=0.5, hue_shift_limit=10, sat_shift_limit=10, val_shift_limit=10),
@@ -263,9 +268,9 @@ if __name__ == "__main__":
             #    a_transform.RandomSnow(p=0.3),
             #    a_transform.RandomContrast(),
             #    a_transform.RGBShift(),
-            # a_transform.OneOf(
-            #     [a_transform.JpegCompression(), a_transform.Downscale(scale_min=0.1, scale_max=0.15),], p=0.2,
-            # ),
+            a_transform.OneOf(
+                [a_transform.JpegCompression(), a_transform.Downscale(scale_min=0.1, scale_max=0.15),], p=0.2,
+            ),
             normalize,
             ToTensorV2(),
         ],

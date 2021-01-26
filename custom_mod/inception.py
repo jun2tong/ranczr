@@ -11,6 +11,7 @@ from timm.data import IMAGENET_DEFAULT_STD, IMAGENET_DEFAULT_MEAN, IMAGENET_INCE
 from timm.models.helpers import build_model_with_cfg
 from timm.models.registry import register_model
 from timm.models.layers import trunc_normal_, create_classifier
+from custom_mod.attention import SimpleSelfAttention
 
 
 def _cfg(url="", **kwargs):
@@ -275,14 +276,16 @@ class InceptionAux(nn.Module):
 
 
 class BasicConv2d(nn.Module):
-    def __init__(self, in_channels, out_channels, **kwargs):
+    def __init__(self, in_channels, out_channels, sa=False, **kwargs):
         super(BasicConv2d, self).__init__()
         self.conv = nn.Conv2d(in_channels, out_channels, bias=False, **kwargs)
         self.bn = nn.BatchNorm2d(out_channels, eps=0.001)
+        self.sa = SimpleSelfAttention(out_channels, ks=1, sym=False) if sa else noop
 
     def forward(self, x):
         x = self.conv(x)
         x = self.bn(x)
+        x = self.sa(x)
         return x * torch.tanh(F.softplus(x))
 
 
@@ -297,7 +300,7 @@ class InceptionV3(nn.Module):
         self.drop_rate = drop_rate
         self.aux_logits = aux_logits
 
-        self.Conv2d_1a_3x3 = BasicConv2d(in_chans, 32, kernel_size=3, stride=2)
+        self.Conv2d_1a_3x3 = BasicConv2d(in_chans, 32, kernel_size=3, stride=2, sa=True)
         self.Conv2d_2a_3x3 = BasicConv2d(32, 32, kernel_size=3)
         self.Conv2d_2b_3x3 = BasicConv2d(32, 64, kernel_size=3, padding=1)
         self.Pool1 = nn.MaxPool2d(kernel_size=3, stride=2)
@@ -437,6 +440,10 @@ def _create_inception_v3(variant, pretrained=False, **kwargs):
     return build_model_with_cfg(
         model_cls, variant, pretrained, default_cfg=default_cfgs[variant], pretrained_strict=load_strict, **kwargs
     )
+
+
+def noop(x):
+    return x
 
 
 @register_model
