@@ -215,7 +215,7 @@ if __name__ == "__main__":
         num_workers = 4
         patience = 7
         segment_model = False
-        model_name = "ecaR50_pruned"
+        model_name = "BiT-M-R50x1"
         backbone_name = "efficientnet-b2"
         resume = False
         resume_path = ""
@@ -223,7 +223,7 @@ if __name__ == "__main__":
         scheduler = "CosineAnnealingLR"
         epochs = 30
         sch_step = [0.4, 0.4, 0.2]
-        lr = 0.001
+        lr = 0.0008
         min_lr = 0.000002
         batch_size = 32
         weight_decay = 1e-5

@@ -35,7 +35,7 @@ def train_fn(train_loader, model, criterion, optimizer, epoch, scheduler, device
         optimizer.zero_grad()
         loss.backward()
 
-        grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), 1000)
+        grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), 1.)
         optimizer.step()
         # scheduler.step()
 

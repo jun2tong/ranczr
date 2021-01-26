@@ -17,17 +17,17 @@ import segmentation_models_pytorch as smp
 class CustomResNext(nn.Module):
     def __init__(self, model_name, target_size=11):
         super().__init__()
-        # weights = get_weights(f"pre-trained/{model_name}.npz")
+        weights = get_weights(f"pre-trained/{model_name}.npz")
         # ("BiT-M-R50x1", lambda *a, **kw: ResNetV2([3, 4, 6, 3], 1, *a, **kw)),
         # ("BiT-M-R50x3", lambda *a, **kw: ResNetV2([3, 4, 6, 3], 3, *a, **kw)),
         # ("BiT-M-R101x1", lambda *a, **kw: ResNetV2([3, 4, 23, 3], 1, *a, **kw)),
         # ("BiT-M-R101x3", lambda *a, **kw: ResNetV2([3, 4, 23, 3], 3, *a, **kw)),
-        # self.model = ResNetV2([3, 4, 6, 3], 1, head_size=target_size, zero_head=True)
-        # self.model.load_from(weights)
+        self.model = ResNetV2([3, 4, 6, 3], 1, head_size=target_size, zero_head=True)
+        self.model.load_from(weights)
         # print("Load complete")
-        self.model = timm.models.resnet.ecaresnet50d_pruned(True)
-        n_features = self.model.fc.in_features
-        self.model.fc = nn.Linear(n_features, target_size)
+        # self.model = timm.models.resnet.ecaresnet50d_pruned(True)
+        # n_features = self.model.fc.in_features
+        # self.model.fc = nn.Linear(n_features, target_size)
 
     def forward(self, x):
         x = self.model(x)

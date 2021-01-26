@@ -22,7 +22,7 @@ from collections import OrderedDict  # pylint: disable=g-importing-member
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from custom_mod.attention import SimpleSelfAttention
+from custom_mod.attention import SimpleSelfAttention, CBAM
 
 
 class StdConv2d(nn.Conv2d):
@@ -73,7 +73,8 @@ class PreActBottleneck(nn.Module):
         self.gn3 = nn.GroupNorm(32, cmid)
         self.conv3 = conv1x1(cmid, cout)
         self.relu = nn.ReLU(inplace=True)
-        self.sa = SimpleSelfAttention(cout, ks=1, sym=False) if sa else noop
+        # self.sa = SimpleSelfAttention(cout, ks=1, sym=False) if sa else noop
+        self.sa = CBAM(cout) if sa else noop
 
         if stride != 1 or cin != cout:
             # Projection also with pre-activation according to paper.
@@ -163,9 +164,9 @@ class ResNetV2(nn.Module):
                         "block3",
                         nn.Sequential(
                             OrderedDict(
-                                [("unit01", PreActBottleneck(cin=512 * wf, cout=1024 * wf, cmid=256 * wf, stride=2))]
+                                [("unit01", PreActBottleneck(cin=512 * wf, cout=1024 * wf, cmid=256 * wf, stride=2, sa=True))]
                                 + [
-                                    (f"unit{i:02d}", PreActBottleneck(cin=1024 * wf, cout=1024 * wf, cmid=256 * wf))
+                                    (f"unit{i:02d}", PreActBottleneck(cin=1024 * wf, cout=1024 * wf, cmid=256 * wf, sa=True))
                                     for i in range(2, block_units[2] + 1)
                                 ],
                             )
@@ -175,17 +176,9 @@ class ResNetV2(nn.Module):
                         "block4",
                         nn.Sequential(
                             OrderedDict(
-                                [("unit01", PreActBottleneck(cin=1024 * wf, cout=2048 * wf, cmid=512 * wf, stride=2))]
+                                [("unit01", PreActBottleneck(cin=1024 * wf, cout=2048 * wf, cmid=512 * wf, stride=2, sa=True))]
                                 + [
-                                    (
-                                        f"unit{i:02d}",
-                                        PreActBottleneck(
-                                            cin=2048 * wf,
-                                            cout=2048 * wf,
-                                            cmid=512 * wf,
-                                            sa=True if i == block_units[3] else False,
-                                        ),
-                                    )
+                                    (f"unit{i:02d}", PreActBottleneck(cin=2048 * wf, cout=2048 * wf, cmid=512 * wf, sa=True))
                                     for i in range(2, block_units[3] + 1)
                                 ],
                             )
@@ -229,9 +222,13 @@ class ResNetV2(nn.Module):
                 )  # pylint: disable=line-too-long
                 self.head.conv.bias.copy_(tf2th(weights[f"{prefix}head/conv2d/bias"]))
 
+            idx = 0
             for bname, block in self.body.named_children():
                 for uname, unit in block.named_children():
                     unit.load_from(weights, prefix=f"{prefix}{bname}/{uname}/")
+                    if idx == 0:
+                        print("loaded")
+                        idx += 1
 
 
 # KNOWN_MODELS = OrderedDict(

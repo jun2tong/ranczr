@@ -33,7 +33,7 @@ class Ranger(Optimizer):
         lr=1e-3,  # lr
         alpha=0.5,
         k=6,
-        N_sma_threshhold=5,  # Ranger options
+        N_sma_threshhold=4,  # Ranger options
         betas=(0.95, 0.999),
         eps=1e-5,
         weight_decay=0,  # Adam options
