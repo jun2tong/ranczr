@@ -22,7 +22,7 @@ from collections import OrderedDict  # pylint: disable=g-importing-member
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from custom_mod.attention import SimpleSelfAttention, CBAM
+from custom_mod.attention import CBAM
 
 
 class StdConv2d(nn.Conv2d):
@@ -140,9 +140,12 @@ class ResNetV2(nn.Module):
                         "block1",
                         nn.Sequential(
                             OrderedDict(
-                                [("unit01", PreActBottleneck(cin=64 * wf, cout=256 * wf, cmid=64 * wf))]
+                                [("unit01", PreActBottleneck(cin=64 * wf, cout=256 * wf, cmid=64 * wf, sa=True))]
                                 + [
-                                    (f"unit{i:02d}", PreActBottleneck(cin=256 * wf, cout=256 * wf, cmid=64 * wf))
+                                    (
+                                        f"unit{i:02d}",
+                                        PreActBottleneck(cin=256 * wf, cout=256 * wf, cmid=64 * wf, sa=True),
+                                    )
                                     for i in range(2, block_units[0] + 1)
                                 ],
                             )
@@ -152,9 +155,17 @@ class ResNetV2(nn.Module):
                         "block2",
                         nn.Sequential(
                             OrderedDict(
-                                [("unit01", PreActBottleneck(cin=256 * wf, cout=512 * wf, cmid=128 * wf, stride=2))]
+                                [
+                                    (
+                                        "unit01",
+                                        PreActBottleneck(cin=256 * wf, cout=512 * wf, cmid=128 * wf, stride=2, sa=True),
+                                    )
+                                ]
                                 + [
-                                    (f"unit{i:02d}", PreActBottleneck(cin=512 * wf, cout=512 * wf, cmid=128 * wf))
+                                    (
+                                        f"unit{i:02d}",
+                                        PreActBottleneck(cin=512 * wf, cout=512 * wf, cmid=128 * wf, sa=True),
+                                    )
                                     for i in range(2, block_units[1] + 1)
                                 ],
                             )
@@ -164,9 +175,19 @@ class ResNetV2(nn.Module):
                         "block3",
                         nn.Sequential(
                             OrderedDict(
-                                [("unit01", PreActBottleneck(cin=512 * wf, cout=1024 * wf, cmid=256 * wf, stride=2, sa=True))]
+                                [
+                                    (
+                                        "unit01",
+                                        PreActBottleneck(
+                                            cin=512 * wf, cout=1024 * wf, cmid=256 * wf, stride=2, sa=True
+                                        ),
+                                    )
+                                ]
                                 + [
-                                    (f"unit{i:02d}", PreActBottleneck(cin=1024 * wf, cout=1024 * wf, cmid=256 * wf, sa=True))
+                                    (
+                                        f"unit{i:02d}",
+                                        PreActBottleneck(cin=1024 * wf, cout=1024 * wf, cmid=256 * wf, sa=True),
+                                    )
                                     for i in range(2, block_units[2] + 1)
                                 ],
                             )
@@ -176,9 +197,19 @@ class ResNetV2(nn.Module):
                         "block4",
                         nn.Sequential(
                             OrderedDict(
-                                [("unit01", PreActBottleneck(cin=1024 * wf, cout=2048 * wf, cmid=512 * wf, stride=2, sa=True))]
+                                [
+                                    (
+                                        "unit01",
+                                        PreActBottleneck(
+                                            cin=1024 * wf, cout=2048 * wf, cmid=512 * wf, stride=2, sa=True
+                                        ),
+                                    )
+                                ]
                                 + [
-                                    (f"unit{i:02d}", PreActBottleneck(cin=2048 * wf, cout=2048 * wf, cmid=512 * wf, sa=True))
+                                    (
+                                        f"unit{i:02d}",
+                                        PreActBottleneck(cin=2048 * wf, cout=2048 * wf, cmid=512 * wf, sa=True),
+                                    )
                                     for i in range(2, block_units[3] + 1)
                                 ],
                             )

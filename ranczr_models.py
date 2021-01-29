@@ -2,15 +2,18 @@ import copy
 import torch
 import torch.nn as nn
 import timm
+import pdb
 
 from collections import OrderedDict
 from torch.nn import functional as F
+from torch.cuda.amp import autocast
 from torchvision import models
 from torchvision.models._utils import IntermediateLayerGetter
 from torchvision.models.segmentation.deeplabv3 import DeepLabHead
 from efficientnet_pytorch import EfficientNet
 from custom_mod.inception import inception_v3
 from custom_mod.bit_resnet import ResNetV2, get_weights
+from custom_mod.attention import CBAM
 import segmentation_models_pytorch as smp
 
 
@@ -78,6 +81,7 @@ class CustomEffNet(nn.Module):
 
 class SMPModel(nn.Module):
     def __init__(self, model_name, aux_dict, weight_dir):
+        super().__init__()
         self.model = smp.Unet(model_name, classes=1, aux_params=aux_dict)
         self.model.load_state_dict(torch.load(weight_dir)["model"])
 
@@ -85,3 +89,71 @@ class SMPModel(nn.Module):
         enc_out = self.model.encoder(x)
         out = self.model.classification_head(enc_out[-1])
         return out
+
+
+class RANCZRResNet200D(nn.Module):
+    def __init__(self, model_name="resnet200d", out_dim=11, pretrained=False):
+        super().__init__()
+        self.model = timm.create_model(model_name, pretrained=False)
+        n_features = self.model.fc.in_features
+        self.model.global_pool = nn.Identity()
+        self.model.fc = nn.Identity()
+        self.pooling = nn.AdaptiveAvgPool2d(1)
+        self.fc = nn.Linear(n_features, out_dim)
+
+    def forward(self, x):
+        bs = x.size(0)
+        features = self.model(x)
+        pooled_features = self.pooling(features).view(bs, -1)
+        output = self.fc(pooled_features)
+        return output
+
+
+class EffNetWLF(nn.Module):
+
+    def __init__(self, model_name, target_size=11, prev_weights=None):
+        super().__init__()
+        self.backbone = EfficientNet.from_pretrained(model_name)
+
+        self.backbone._dropout = nn.Dropout(0.1)
+        n_features = self.backbone._fc.in_features
+        self.backbone._fc = nn.Linear(n_features, target_size)
+
+        if prev_weights:
+            self.load_from_pth(prev_weights)
+            print("loaded previous weights")
+
+        self.local_fe = CBAM(n_features)
+        self.dropout = nn.Dropout(0.1)
+        self.classifier = nn.Sequential(nn.Linear(n_features + n_features, n_features),
+                                        nn.BatchNorm1d(n_features),
+                                        nn.Dropout(0.1),
+                                        nn.ReLU(),
+                                        nn.Linear(n_features, target_size))
+
+    def load_from_pth(self, weight_dict):
+        new_state_dict = OrderedDict()
+
+        for old_name, val in weight_dict.items():
+            new_lst = old_name.split(".")[2:]
+            new_name = ".".join(new_lst)
+            new_state_dict[new_name] = val
+        
+        self.backbone.load_state_dict(new_state_dict)
+
+    @autocast()
+    def forward(self, image):
+        enc_feas = self.backbone.extract_features(image)
+
+        # use default's global features
+        global_feas = self.backbone._avg_pooling(enc_feas)
+        global_feas = global_feas.flatten(start_dim=1)
+        global_feas = self.dropout(global_feas)
+
+        local_feas = self.local_fe(enc_feas)
+        local_feas = torch.sum(local_feas, dim=[2,3])
+        local_feas = self.dropout(local_feas)
+
+        all_feas = torch.cat([global_feas, local_feas], dim=1)
+        outputs = self.classifier(all_feas)
+        return outputs

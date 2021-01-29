@@ -42,7 +42,7 @@ class TrainDataset(Dataset):
         file_name = self.img_idx[idx]
         file_path = f"{self.train_path}/{file_name}.jpg"
         image = cv2.imread(file_path, cv2.IMREAD_GRAYSCALE)
-        # image = self.clahe.apply(image)
+        image = self.clahe.apply(image)
         # image = reshape_img(image)
         image = cv2.cvtColor(image, cv2.COLOR_GRAY2RGB)
         # image = NeedleAugmentation(image, n_needles=2, dark_needles=False, p=0.3, needle_folder=self.needle_path)
@@ -201,12 +201,12 @@ class AnnotDatasetS2(Dataset):
 
     def __getitem__(self, idx):
         uid = self.file_names[idx]
-        img_path = os.path.join(f"{self.img_path}",f"{uid}.jpg")
+        img_path = os.path.join(f"{self.img_path}", f"{uid}.jpg")
         tube_mask_path = os.path.join(self.tube_mask_path, f"{uid}.jpg")
 
         # read image and preprocess
         image = cv2.imread(img_path, cv2.IMREAD_GRAYSCALE)
-        image = self.clahe.apply(image)
+        # image = self.clahe.apply(image)
         image = cv2.cvtColor(image, cv2.COLOR_GRAY2RGB)
 
         # annot_image = image.copy()
@@ -225,7 +225,7 @@ class AnnotDatasetS2(Dataset):
         tube_mask[mask] = 0
         if self.transform:
             augmented = self.transform(image=image, mask=tube_mask)
-            tube_mask = augmented['mask']
+            tube_mask = augmented["mask"]
             # annot_image = augmented["image_annot"]
             image = augmented["image"]
         tube_mask = tube_mask.unsqueeze(0).float() / 255.0

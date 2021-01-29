@@ -5,7 +5,7 @@ import pandas as pd
 import numpy as np
 import torch
 import torch.nn as nn
-
+import sys
 
 from optimizer import Ranger
 from dataset import TrainDataset, SegDataset, AnnotDataset, ValidDataset
@@ -62,7 +62,7 @@ def train_loop(folds, fold):
     )
     valid_loader = DataLoader(
         valid_dataset,
-        batch_size=CFG.batch_size * 2,
+        batch_size=CFG.batch_size,
         shuffle=False,
         num_workers=CFG.num_workers,
         pin_memory=True,
@@ -73,10 +73,7 @@ def train_loop(folds, fold):
     # model & optimizer
     # ====================================================
     # model = CustomResNext(CFG.model_name, pretrained=True, target_size=CFG.target_size)
-    if CFG.segment_model:
-        raise NotImplementedError("Segmentation model not implemented")
-        # model = SegModel(CFG.model_name, target_size=CFG.target_size)
-    elif "efficient" in CFG.model_name:
+    if "efficient" in CFG.model_name:
         model = CustomEffNet(CFG.model_name, target_size=CFG.target_size)
     elif "xception" in CFG.model_name:
         model = CustomXception("pretrained_weights/xception-43020ad28.pth", target_size=CFG.target_size)
@@ -90,21 +87,25 @@ def train_loop(folds, fold):
             classes=CFG.target_size,  # define number of output labels
         )
         weight_dir = f"results/stage2/{CFG.backbone_name}_fold{fold}_S2_best.pth"
+        if CFG.refine_model:
+            weight_dir = f"results/stage3/{CFG.backbone_name}_fold{fold}_S3_best.pth"
         model = SMPModel(CFG.backbone_name, aux_params, weight_dir)
     else:
         model = CustomResNext(CFG.model_name, target_size=CFG.target_size)
 
     model = nn.DataParallel(model)
     model.to(device)
+
     if CFG.resume:
-        check_point = torch.load(CFG.resume_path)
+        resume_path = f"results/stage2/{CFG.model_name}_fold{fold}_S2_best.pth"
+        check_point = torch.load(resume_path)
         model.load_state_dict(check_point["model"])
 
     # optimizer = torch.optim.Adam(model.parameters(), lr=CFG.lr, weight_decay=CFG.weight_decay)
     optimizer = Ranger(model.parameters(), lr=CFG.lr, weight_decay=CFG.weight_decay)
-    step_var = int(CFG.epochs * CFG.sch_step[0])
-    scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=step_var, gamma=0.8)
-    # scheduler1 = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=CFG.epochs//2)
+    # step_var = int(CFG.epochs * CFG.sch_step[0])
+    # scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=step_var, gamma=0.8)
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=CFG.epochs, eta_min=CFG.min_lr)
 
     # ====================================================
     # scheduler
@@ -129,16 +130,19 @@ def train_loop(folds, fold):
     best_loss = np.inf
     update_count = 0
     to_save = False
-    change_point = int(CFG.epochs * np.sum(CFG.sch_step[:-1]))
-    rem_step = int(CFG.epochs * (1.0 - np.sum(CFG.sch_step[:-1]))) + 1
-    LOGGER.info(f"Change point: {change_point} Rem Steps: {rem_step}")
+    # change_point = int(CFG.epochs * np.sum(CFG.sch_step[:-1]))
+    # rem_step = int(CFG.epochs * (1.0 - np.sum(CFG.sch_step[:-1]))) + 1
+    # LOGGER.info(f"Change point: {change_point} Rem Steps: {rem_step}")
     for epoch in range(CFG.epochs):
 
         start_time = time.time()
-        if epoch == change_point:
-            print(f"Going into cosine regime with {rem_step} steps")
-            optimizer.param_groups[0]["lr"] = scheduler.get_last_lr()[0]
-            scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=rem_step, eta_min=CFG.min_lr)
+        # if epoch == change_point:
+        #     start_lr = scheduler.get_last_lr()[0]
+        #     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=rem_step, eta_min=CFG.min_lr)
+        #     optimizer.param_groups[0]["lr"] = start_lr
+        #     scheduler._last_lr[0] = start_lr
+        #     LOGGER.info(f"Going into cosine regime with {rem_step} steps at lr: {scheduler.get_last_lr()[0]}")
+
         # train
         avg_loss = train_fn(train_loader, model, criterion, optimizer, epoch, scheduler, device)
         # avg_loss = train_fn_seg(train_loader, model, criterion, optimizer, epoch, scheduler, device)
@@ -214,18 +218,18 @@ if __name__ == "__main__":
         print_freq = 100
         num_workers = 4
         patience = 7
-        segment_model = False
-        model_name = "BiT-M-R50x1"
+        refine_model = False
+        model_name = "efficientnet-b5"
         backbone_name = "efficientnet-b2"
-        resume = False
-        resume_path = ""
-        size = 1024
+        resume = True
+        # resume_path = "efficientnet-b5_fold1_S2_best.pth"
+        size = 512
         scheduler = "CosineAnnealingLR"
-        epochs = 30
-        sch_step = [0.4, 0.4, 0.2]
-        lr = 0.0008
-        min_lr = 0.000002
-        batch_size = 32
+        epochs = 10
+        sch_step = [0.25, 0.25, 0.5]
+        lr = 0.00003
+        min_lr = 0.000001
+        batch_size = 16
         weight_decay = 1e-5
         gradient_accumulation_steps = 1
         max_grad_norm = 1000
@@ -245,7 +249,7 @@ if __name__ == "__main__":
             "Swan Ganz Catheter Present",
         ]
         n_fold = 5
-        trn_fold = [0]
+        trn_fold = [2]
         train = True
 
     normalize = a_transform.Normalize(
@@ -257,20 +261,20 @@ if __name__ == "__main__":
         [
             a_transform.RandomResizedCrop(CFG.size, CFG.size, scale=(0.9, 1.0), p=1),
             a_transform.HorizontalFlip(p=0.5),
-            a_transform.OneOf([a_transform.GaussNoise(var_limit=[10, 50]), a_transform.GaussianBlur()], p=0.5),
+            # a_transform.OneOf([a_transform.GaussNoise(var_limit=[10, 50]), a_transform.GaussianBlur()], p=0.5),
             # a_transform.CLAHE(clip_limit=(1, 10), p=0.5),
             # a_transform.Rotate(limit=30),
             #    a_transform.RandomBrightnessContrast(p=0.2, brightness_limit=(-0.2, 0.2), contrast_limit=(-0.2, 0.2)),
-            a_transform.HueSaturationValue(p=0.5, hue_shift_limit=10, sat_shift_limit=10, val_shift_limit=10),
-            a_transform.ShiftScaleRotate(p=0.5, shift_limit=0.0625, scale_limit=0.2, rotate_limit=30),
+            # a_transform.HueSaturationValue(p=0.5, hue_shift_limit=10, sat_shift_limit=10, val_shift_limit=10),
+            # a_transform.ShiftScaleRotate(p=0.5, shift_limit=0.0625, scale_limit=0.2, rotate_limit=30),
             #    a_transform.CoarseDropout(p=0.2),
             #    a_transform.Cutout(p=0.2, max_h_size=8, max_w_size=8, fill_value=(0., 0., 0.), num_holes=8),
             #    a_transform.RandomSnow(p=0.3),
             #    a_transform.RandomContrast(),
             #    a_transform.RGBShift(),
-            a_transform.OneOf(
-                [a_transform.JpegCompression(), a_transform.Downscale(scale_min=0.1, scale_max=0.15),], p=0.2,
-            ),
+            # a_transform.OneOf(
+            #     [a_transform.JpegCompression(), a_transform.Downscale(scale_min=0.1, scale_max=0.15),], p=0.2,
+            # ),
             normalize,
             ToTensorV2(),
         ],

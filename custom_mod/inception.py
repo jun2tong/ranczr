@@ -11,7 +11,7 @@ from timm.data import IMAGENET_DEFAULT_STD, IMAGENET_DEFAULT_MEAN, IMAGENET_INCE
 from timm.models.helpers import build_model_with_cfg
 from timm.models.registry import register_model
 from timm.models.layers import trunc_normal_, create_classifier
-from custom_mod.attention import SimpleSelfAttention
+# from custom_mod.attention import SimpleSelfAttention
 
 
 def _cfg(url="", **kwargs):
@@ -280,7 +280,7 @@ class BasicConv2d(nn.Module):
         super(BasicConv2d, self).__init__()
         self.conv = nn.Conv2d(in_channels, out_channels, bias=False, **kwargs)
         self.bn = nn.BatchNorm2d(out_channels, eps=0.001)
-        self.sa = SimpleSelfAttention(out_channels, ks=1, sym=False) if sa else noop
+        self.sa = noop
 
     def forward(self, x):
         x = self.conv(x)

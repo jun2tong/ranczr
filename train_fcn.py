@@ -2,16 +2,16 @@ import numpy as np
 import time
 import torch
 import torch.nn.functional as F
+from torch.cuda.amp import autocast
 import pdb
 from utils import AverageMeter, timeSince
 
 
-def train_fn(train_loader, model, criterion, optimizer, epoch, scheduler, device):
+def train_fn(train_loader, model, criterion, optimizer, epoch, scheduler, device, scaler=None):
     #     scaler = GradScaler()
     batch_time = AverageMeter()
     data_time = AverageMeter()
     losses = AverageMeter()
-    scores = AverageMeter()
     # switch to train mode
     model.train()
     start = end = time.time()
@@ -26,18 +26,29 @@ def train_fn(train_loader, model, criterion, optimizer, epoch, scheduler, device
         img, targets_a, targets_b, lam = mixup_data(img, labels, 1.0, device)
         # inputs, targets_a, targets_b = map(Variable, (inputs,
         #                                               targets_a, targets_b))
-
-        y_preds = model(img)
-        loss = mixup_criterion(criterion["seg"], y_preds, targets_a, targets_b, lam)
-        # loss = criterion["cls"](y_preds, labels)
+        if scaler:
+            with autocast():
+                y_preds = model(img)
+                loss = mixup_criterion(criterion["seg"], y_preds, targets_a, targets_b, lam)
+        else:
+            y_preds = model(img)
+            loss = mixup_criterion(criterion["seg"], y_preds, targets_a, targets_b, lam)
+        # loss = criterion["seg"](y_preds, labels)
         # record loss
         losses.update(loss.item(), batch_size)
         optimizer.zero_grad()
-        loss.backward()
+        if scaler:
+            scaler.scale(loss).backward()
+            scaler.unscale_(optimizer)
+            grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), 1000)
+            scaler.step(optimizer)
+            scaler.update()
+        else:
+            loss.backward()
+            grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), 1000)
+            optimizer.step()
 
-        grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), 1.)
-        optimizer.step()
-        # scheduler.step()
+        scheduler.step()
 
         # measure elapsed time
         batch_time.update(time.time() - end)
@@ -52,7 +63,7 @@ def train_fn(train_loader, model, criterion, optimizer, epoch, scheduler, device
                 f"Grad: {grad_norm:.4f} lr: {scheduler.get_last_lr()[0]:.6f}"
             )
             print(print_str)
-    scheduler.step()
+    # scheduler.step()
     return losses.avg
 
 
@@ -114,7 +125,7 @@ def train_fn_s2(train_loader, teacher, model, optimizer, epoch, scheduler, devic
     # switch to train mode
     model.train()
     start = end = time.time()
-    for step, (img_mb, mask_mb, label_mb) in enumerate(train_loader):
+    for step, (img_mb, _, label_mb) in enumerate(train_loader):
         # measure data loading time
         data_time.update(time.time() - end)
 
@@ -122,30 +133,26 @@ def train_fn_s2(train_loader, teacher, model, optimizer, epoch, scheduler, devic
         # ant_img_mb = ant_img_mb.to(device)
         batch_size = img_mb.size(0)
         # Model predictions
-        pred_mask, pred_y = model(img_mb)
-        # enc_out = model.encoder(img_mb)
-        # pred_y = model.classification_head(enc_out[-1])
-        # pred_mask = model.segmentation_head(model.decoder(*enc_out))
+        pred_y = model(img_mb)
 
         # features matching
-        # with torch.no_grad():
-        #     teacher_feas = teacher.encoder(ant_img_mb)[-1]
+        with torch.no_grad():
+            teacher_feas = teacher(img_mb)
         # _, teacher_feas = teacher(ant_img_mb)
         # teacher_feas = torch.sigmoid(teacher_feas)
-        # teach_loss = F.mse_loss(enc_out[-1], teacher_feas)
-        seg_loss = F.binary_cross_entropy_with_logits(pred_mask, mask_mb.to(device))
+        teach_loss = F.mse_loss(pred_y, teacher_feas)
         cls_loss = F.binary_cross_entropy_with_logits(pred_y, label_mb.to(device))
-        loss = seg_loss + cls_loss
+        loss = cls_loss + 0.5 * teach_loss
 
         # Record Loss
         losses.update(loss.item(), batch_size)
-        feas_losses.update(seg_loss.item(), batch_size)
+        feas_losses.update(teach_loss.item(), batch_size)
         cls_losses.update(cls_loss.item(), batch_size)
         optimizer.zero_grad()
         loss.backward()
         grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), 1000)
         optimizer.step()
-        scheduler.step()
+        # scheduler.step()
 
         # record loss
         batch_time.update(time.time() - end)
@@ -161,6 +168,7 @@ def train_fn_s2(train_loader, teacher, model, optimizer, epoch, scheduler, devic
                 f"Grad: {grad_norm:.4f} lr: {scheduler.get_last_lr()[0]:.6f}"
             )
             print(print_str)
+    scheduler.step()
     return losses.avg, feas_losses.avg, cls_losses.avg
 
 
