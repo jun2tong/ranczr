@@ -116,7 +116,7 @@ def train_fn_seg(train_loader, model, criterion, optimizer, epoch, scheduler, de
     return losses.avg, seg_losses.avg, cls_losses.avg
 
 
-def train_fn_s2(train_loader, teacher, model, optimizer, epoch, scheduler, device):
+def train_fn_s2(train_loader, teacher, model, optimizer, epoch, scheduler, device, scaler):
     batch_time = AverageMeter()
     data_time = AverageMeter()
     losses = AverageMeter()
@@ -132,26 +132,30 @@ def train_fn_s2(train_loader, teacher, model, optimizer, epoch, scheduler, devic
         img_mb = img_mb.to(device)
         # ant_img_mb = ant_img_mb.to(device)
         batch_size = img_mb.size(0)
-        # Model predictions
-        pred_y = model(img_mb)
-
         # features matching
         with torch.no_grad():
             teacher_feas = teacher(img_mb)
-        # _, teacher_feas = teacher(ant_img_mb)
-        # teacher_feas = torch.sigmoid(teacher_feas)
-        teach_loss = F.mse_loss(pred_y, teacher_feas)
-        cls_loss = F.binary_cross_entropy_with_logits(pred_y, label_mb.to(device))
-        loss = cls_loss + 0.5 * teach_loss
+
+        # Model predictions
+        with autocast():
+            pred_y = model(img_mb)
+            teach_loss = F.mse_loss(pred_y, teacher_feas)
+            cls_loss = F.binary_cross_entropy_with_logits(pred_y, label_mb.to(device))
+            loss = cls_loss + 0.5 * teach_loss
 
         # Record Loss
         losses.update(loss.item(), batch_size)
         feas_losses.update(teach_loss.item(), batch_size)
         cls_losses.update(cls_loss.item(), batch_size)
         optimizer.zero_grad()
-        loss.backward()
+        scaler.scale(loss).backward()
+        scaler.unscale_(optimizer)
         grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), 1000)
-        optimizer.step()
+        scaler.step(optimizer)
+        scaler.update()
+        # loss.backward()
+        # grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), 1000)
+        # optimizer.step()
         # scheduler.step()
 
         # record loss

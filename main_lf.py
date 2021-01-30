@@ -114,7 +114,7 @@ def train_loop(folds, fold):
         start_time = time.time()
 
         # train
-        avg_loss = train_fn(train_loader, model, criterion, optimizer, epoch, scheduler, device, None)
+        avg_loss = train_fn(train_loader, model, criterion, optimizer, epoch, scheduler, device, grad_scaler)
 
         # eval
         avg_val_loss, preds = valid_fn(valid_loader, model, criterion["seg"], device)
@@ -184,7 +184,7 @@ if __name__ == "__main__":
         debug = False
         print_freq = 100
         num_workers = 4
-        patience = 100
+        patience = 10
         refine_model = False
         model_name = "efficientnet-b5"
         backbone_name = "efficientnet-b2"

@@ -15,7 +15,7 @@ from utils import get_score, init_logger
 from losses import FocalLoss
 
 # from ranczr_models import CustomEffNet, CustomResNext, CustomXception, CustomInceptionV3
-from ranczr_models import RANCZRResNet200D, CustomEffNet
+from ranczr_models import RANCZRResNet200D, CustomEffNet, EffNetWLF
 from sklearn.model_selection import StratifiedKFold, GroupKFold, KFold
 
 import albumentations as a_transform
@@ -78,7 +78,8 @@ def train_loop(folds, fold):
     #     classes=CFG.target_size,  # define number of output labels
     # )
     # student_model = smp.Unet(CFG.model_name, classes=1, aux_params=aux_params).to(device)
-    student_model = CustomEffNet(CFG.model_name)
+    # student_model = CustomEffNet(CFG.model_name)
+    student_model = EffNetWLF(CFG.model_name)
     student_model = nn.DataParallel(student_model)
     student_model.to(device)
 
@@ -90,16 +91,16 @@ def train_loop(folds, fold):
     # teacher_model = teacher_model.module
     teacher_model.eval()
     for param in teacher_model.parameters():
-        param.requires_grad_ = False
+        param.requires_grad = False
 
-    # optimizer = torch.optim.Adam(model.parameters(), lr=CFG.lr, weight_decay=CFG.weight_decay)
+    # optimizer = torch.optim.Adam(student_model.parameters(), lr=CFG.lr, weight_decay=CFG.weight_decay)
     optimizer = Ranger(student_model.parameters(), lr=CFG.lr * 0.1, weight_decay=CFG.weight_decay)
     # step_var = int(CFG.epochs * CFG.sch_step[0])
     # scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=step_var, gamma=0.8)
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=CFG.epochs, eta_min=CFG.min_lr)
 
     criterion = {"cls": FocalLoss(alpha=1.8, gamma=1.2, logits=True), "seg": nn.BCEWithLogitsLoss()}
-
+    grad_scaler = torch.cuda.amp.GradScaler()
     best_score = 0.0
     best_loss = np.inf
     update_count = 0
@@ -117,9 +118,7 @@ def train_loop(folds, fold):
             scheduler._last_lr[0] = start_lr
             LOGGER.info(f"Going into cosine regime at lr: {scheduler.get_last_lr()[0]}")
         # train
-        avg_loss, feas_loss, cls_loss = train_fn_s2(
-            train_loader, teacher_model, student_model, optimizer, epoch, scheduler, device
-        )
+        avg_loss, feas_loss, cls_loss = train_fn_s2(train_loader, teacher_model, student_model, optimizer, epoch, scheduler, device, grad_scaler)
 
         # eval
         avg_val_loss, preds = valid_fn(valid_loader, student_model, criterion["seg"], device)
@@ -141,9 +140,8 @@ def train_loop(folds, fold):
             if score > best_score:
                 best_score = score
             LOGGER.info(f"Epoch {epoch+1} - Save Best Loss: {best_loss:.4f} Model")
-            torch.save(
-                {"model": student_model.state_dict(), "preds": preds}, f"{CFG.model_name}_fold{fold}_S2_best.pth"
-            )
+            torch.save({"model": student_model.state_dict(), "preds": preds}, 
+                        f"{CFG.model_name}_fold{fold}_S2_best.pth")
         else:
             update_count += 1
             if update_count >= CFG.patience:
@@ -194,7 +192,7 @@ if __name__ == "__main__":
         num_workers = 4
         patience = 10
         segment_model = False
-        model_name = "efficientnet-b5"
+        model_name = "efficientnet-b2"
         teacher_model = "efficientnet-b2"
         size = 512
         scheduler = "CosineAnnealingLR"
@@ -202,7 +200,7 @@ if __name__ == "__main__":
         sch_step = [0.3, 0.3, 0.4]
         lr = 0.0008
         min_lr = 0.000002
-        batch_size = 16
+        batch_size = 32
         weight_decay = 1e-6
         gradient_accumulation_steps = 1
         max_grad_norm = 1000
@@ -222,7 +220,7 @@ if __name__ == "__main__":
             "Swan Ganz Catheter Present",
         ]
         n_fold = 5
-        trn_fold = [2]
+        trn_fold = [3,4]
         train = True
 
     normalize = a_transform.Normalize(
