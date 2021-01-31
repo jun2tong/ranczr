@@ -79,7 +79,8 @@ def train_loop(folds, fold):
     model = EffNetWLF(CFG.model_name, CFG.target_size)
     if torch.cuda.device_count() > 1:
         model = nn.DataParallel(model)
-    model.load_state_dict(check_point["model"])
+    remove_name = True if fold in [0,1,2] else False
+    model.module.load_from_pth(check_point["model"], remove_name)
 
     model.to(device)
 
@@ -206,7 +207,7 @@ if __name__ == "__main__":
         scheduler = "CosineAnnealingLR"
         epochs = 30
         sch_step = [0.25, 0.25, 0.5]
-        lr = 0.00025
+        lr = 0.0003
         final_div_factor = 300
         # min_lr = 0.000002
         batch_size = 64
@@ -229,7 +230,7 @@ if __name__ == "__main__":
             "Swan Ganz Catheter Present",
         ]
         n_fold = 5
-        trn_fold = [3]
+        trn_fold = [0,2,3,4]
         train = True
 
     normalize = a_transform.Normalize(

@@ -131,15 +131,18 @@ class EffNetWLF(nn.Module):
                                         nn.ReLU(),
                                         nn.Linear(n_features, target_size))
 
-    def load_from_pth(self, weight_dict):
-        new_state_dict = OrderedDict()
+    def load_from_pth(self, weight_dict, remove=True):
+        if remove:
+            new_state_dict = OrderedDict()
 
-        for old_name, val in weight_dict.items():
-            new_lst = old_name.split(".")[2:]
-            new_name = ".".join(new_lst)
-            new_state_dict[new_name] = val
+            for old_name, val in weight_dict.items():
+                new_lst = old_name.split(".")[2:]
+                new_name = ".".join(new_lst)
+                new_state_dict[new_name] = val
         
-        self.backbone.load_state_dict(new_state_dict)
+            self.backbone.load_state_dict(new_state_dict)
+        else:
+            self.backbone.load_state_dict(weight_dict)
 
     def forward(self, image):
         enc_feas = self.backbone.extract_features(image)
