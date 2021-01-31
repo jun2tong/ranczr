@@ -1,6 +1,7 @@
 import segmentation_models_pytorch as smp
 
 import os
+import sys
 import time
 import pandas as pd
 import numpy as np
@@ -10,7 +11,7 @@ import torch.nn as nn
 from optimizer import Ranger
 from dataset import AnnotDatasetS2, ValidDataset, AnnotDataset
 from torch.utils.data import DataLoader
-from train_fcn import valid_fn, train_fn_s2
+from train_fcn import valid_fn, train_fn_s2, valid_fn_seg
 from utils import get_score, init_logger
 from losses import FocalLoss
 
@@ -22,8 +23,9 @@ import albumentations as a_transform
 from albumentations.pytorch import ToTensorV2
 
 device = "cuda:0" if torch.cuda.is_available() else "cpu"
-WORKDIR = "../data/ranczr"
-# WORKDIR = "/home/jun/project/data/ranzcr-clip-catheter-line-classification"
+# WORKDIR = "../data/ranczr"
+WORKDIR = "/home/jun/project/data/ranzcr-clip-catheter-line-classification"
+torch.backends.cudnn.benchmark = True
 
 
 def train_loop(folds, fold):
@@ -39,16 +41,14 @@ def train_loop(folds, fold):
     train_folds = folds.loc[trn_idx].reset_index(drop=True)
     valid_folds = folds.loc[val_idx].reset_index(drop=True)
 
-    # train_folds = train_folds[train_folds['StudyInstanceUID'].isin(train_annot['StudyInstanceUID'].unique())].reset_index(drop=True)
-    # valid_folds = valid_folds[valid_folds['StudyInstanceUID'].isin(train_annot['StudyInstanceUID'].unique())].reset_index(drop=True)
+    train_folds = train_folds[train_folds['StudyInstanceUID'].isin(train_annot['StudyInstanceUID'].unique())].reset_index(drop=True)
+    valid_folds = valid_folds[valid_folds['StudyInstanceUID'].isin(train_annot['StudyInstanceUID'].unique())].reset_index(drop=True)
 
     valid_labels = valid_folds[CFG.target_cols].values
-    train_dataset = AnnotDatasetS2(
-        WORKDIR, train_folds, train_annot, flip_transform=train_transform, target_cols=CFG.target_cols
-    )
-    # valid_dataset = AnnotDatasetS2(WORKDIR, valid_folds, train_annot,
-    #                                flip_transform=train_transform,
-    #                                target_cols=CFG.target_cols)
+    train_dataset = AnnotDatasetS2(WORKDIR, train_folds, train_annot, 
+                                   flip_transform=train_transform, 
+                                   target_cols=CFG.target_cols)
+    
     valid_dataset = ValidDataset(WORKDIR, valid_folds, transform=valid_transform, target_cols=CFG.target_cols)
 
     train_loader = DataLoader(
@@ -71,52 +71,63 @@ def train_loop(folds, fold):
     # ====================================================
     # model & optimizer
     # ====================================================
-    # aux_params = dict(
-    #     pooling="avg",  # one of 'avg', 'max'
-    #     dropout=None,  # dropout ratio, default is None
-    #     activation=None,  # activation function, default is None
-    #     classes=CFG.target_size,  # define number of output labels
-    # )
-    # student_model = smp.Unet(CFG.model_name, classes=1, aux_params=aux_params).to(device)
-    # student_model = CustomEffNet(CFG.model_name)
-    student_model = EffNetWLF(CFG.model_name)
-    student_model = nn.DataParallel(student_model)
-    student_model.to(device)
+    if CFG.segment_model:
+        student_model = EffNetWLF(CFG.model_name, CFG.target_size, torch.load(f"pre-trained/{CFG.model_name}_fold3_S2_best.pth")["model"])
+        aux_params = dict(pooling="avg",  # one of 'avg', 'max'
+                          dropout=None,  # dropout ratio, default is None
+                          activation=None,  # activation function, default is None
+                          classes=CFG.target_size,  # define number of output labels
+                         )
+        teacher_model = smp.Unet(CFG.model_name, classes=1, aux_params=aux_params)
+        teacher_model = nn.DataParallel(teacher_model)
+        teacher_model.load_state_dict(torch.load(f"results/stage1/vary1/{CFG.teacher_model}_fold{fold}_S1_best.pth")["model"])
+        teacher_model = teacher_model.module
+        if torch.cuda.device_count() > 1:
+            student_model = nn.DataParallel(student_model)
+            teacher_model = nn.DataParallel(teacher_model)
+        student_model.to(device)
+        teacher_model.to(device)        
+    else:
+        student_model = EffNetWLF(CFG.model_name)
+        teacher_model = RANCZRResNet200D()
+        teacher_model.load_state_dict(torch.load(f"pre-trained/resnet200d/resnet200d_fold{fold}.pth"))
+        if torch.cuda.device_count() > 1:
+            student_model = nn.DataParallel(student_model)
+            teacher_model = nn.DataParallel(teacher_model)
+        student_model.to(device)
+        teacher_model.to(device)
 
-    teacher_model = RANCZRResNet200D()
-    teacher_model.load_state_dict(torch.load(f"pre-trained/resnet200d/resnet200d_fold{fold}.pth"))
-    teacher_model = nn.DataParallel(teacher_model)
-    teacher_model.to(device)
     # teacher_model.load_state_dict(torch.load(f"results/stage1/{CFG.teacher_model}_fold{fold}_S1_best.pth")["model"])
     # teacher_model = teacher_model.module
     teacher_model.eval()
     for param in teacher_model.parameters():
         param.requires_grad = False
 
+    pg_lr = [CFG.lr*0.5, CFG.lr*5, CFG.lr*5]
+    optimizer = torch.optim.Adam([{'params': student_model.backbone.parameters(), 'lr': pg_lr[0]},
+                                  {'params': student_model.classifier.parameters(), 'lr': pg_lr[1]},
+                                  {'params': student_model.local_fe.parameters(), 'lr': pg_lr[2]}], 
+                                  weight_decay=CFG.weight_decay)
     # optimizer = torch.optim.Adam(student_model.parameters(), lr=CFG.lr, weight_decay=CFG.weight_decay)
-    optimizer = Ranger(student_model.parameters(), lr=CFG.lr * 0.1, weight_decay=CFG.weight_decay)
+    # optimizer = Ranger(student_model.parameters(), lr=CFG.lr * 0.1, weight_decay=CFG.weight_decay)
     # step_var = int(CFG.epochs * CFG.sch_step[0])
-    # scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=step_var, gamma=0.8)
-    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=CFG.epochs, eta_min=CFG.min_lr)
+    scheduler = torch.optim.lr_scheduler.OneCycleLR(optimizer, max_lr=pg_lr, epochs=CFG.epochs, 
+                                                    steps_per_epoch=len(train_loader), 
+                                                    final_div_factor = CFG.final_div_factor,
+                                                    cycle_momentum=False)
+    # scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=CFG.epochs, eta_min=CFG.min_lr)
 
     criterion = {"cls": FocalLoss(alpha=1.8, gamma=1.2, logits=True), "seg": nn.BCEWithLogitsLoss()}
-    grad_scaler = torch.cuda.amp.GradScaler()
+
+    # grad_scaler = torch.cuda.amp.GradScaler()
+    grad_scaler = None
     best_score = 0.0
     best_loss = np.inf
     update_count = 0
-    # to_save = False
-    # change_point = int(CFG.epochs * np.sum(CFG.sch_step[:-1]))
-    # rem_step = int(CFG.epochs * (1.0 - np.sum(CFG.sch_step[:-1]))) + 1
-    # LOGGER.info(f"Change point: {change_point} Rem Steps: {rem_step}")
     for epoch in range(CFG.epochs):
 
         start_time = time.time()
-        if epoch == 1:
-            start_lr = CFG.lr
-            scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=CFG.epochs - 1, eta_min=CFG.min_lr)
-            optimizer.param_groups[0]["lr"] = start_lr
-            scheduler._last_lr[0] = start_lr
-            LOGGER.info(f"Going into cosine regime at lr: {scheduler.get_last_lr()[0]}")
+
         # train
         avg_loss, feas_loss, cls_loss = train_fn_s2(train_loader, teacher_model, student_model, optimizer, epoch, scheduler, device, grad_scaler)
 
@@ -128,9 +139,7 @@ def train_loop(folds, fold):
 
         elapsed = time.time() - start_time
 
-        LOGGER.info(
-            f"Epoch {epoch+1} - avg_train_loss: {avg_loss:.4f}  avg_val_loss: {avg_val_loss:.4f}  feas_loss: {feas_loss:.4f} cls_loss: {cls_loss:.4f} time: {elapsed:.0f}s"
-        )
+        LOGGER.info(f"Epoch {epoch+1} - avg_train_loss: {avg_loss:.4f}  avg_val_loss: {avg_val_loss:.4f}  feas_loss: {feas_loss:.4f} cls_loss: {cls_loss:.4f} time: {elapsed:.0f}s")
         LOGGER.info(f"Epoch {epoch+1} - Score: {score:.4f}  Scores: {np.round(scores, decimals=4)}")
 
         if avg_val_loss < best_loss or score > best_score:
@@ -190,16 +199,18 @@ if __name__ == "__main__":
         debug = False
         print_freq = 100
         num_workers = 4
-        patience = 10
-        segment_model = False
+        patience = 100
+        segment_model = True
         model_name = "efficientnet-b2"
         teacher_model = "efficientnet-b2"
         size = 512
         scheduler = "CosineAnnealingLR"
         epochs = 25
         sch_step = [0.3, 0.3, 0.4]
-        lr = 0.0008
-        min_lr = 0.000002
+        # lr = 0.0008
+        lr = 0.0002
+        final_div_factor = 200
+        # min_lr = 0.000002
         batch_size = 32
         weight_decay = 1e-6
         gradient_accumulation_steps = 1
@@ -220,7 +231,7 @@ if __name__ == "__main__":
             "Swan Ganz Catheter Present",
         ]
         n_fold = 5
-        trn_fold = [3,4]
+        trn_fold = [3]
         train = True
 
     normalize = a_transform.Normalize(
@@ -242,7 +253,7 @@ if __name__ == "__main__":
             ToTensorV2(),
         ],
         p=1.0,
-        # additional_targets={'image_annot': 'image'}
+        additional_targets={'image_annot': 'image'}
     )
 
     valid_transform = a_transform.Compose([a_transform.Resize(CFG.size, CFG.size), normalize, ToTensorV2()], p=1.0)

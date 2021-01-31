@@ -202,32 +202,32 @@ class AnnotDatasetS2(Dataset):
     def __getitem__(self, idx):
         uid = self.file_names[idx]
         img_path = os.path.join(f"{self.img_path}", f"{uid}.jpg")
-        tube_mask_path = os.path.join(self.tube_mask_path, f"{uid}.jpg")
+        # tube_mask_path = os.path.join(self.tube_mask_path, f"{uid}.jpg")
 
         # read image and preprocess
         image = cv2.imread(img_path, cv2.IMREAD_GRAYSCALE)
-        # image = self.clahe.apply(image)
+        image = self.clahe.apply(image)
         image = cv2.cvtColor(image, cv2.COLOR_GRAY2RGB)
 
-        # annot_image = image.copy()
-        # query_string = f"StudyInstanceUID == '{uid}'"
-        # df = self.df_annotations.query(query_string)
+        annot_image = image.copy()
+        query_string = f"StudyInstanceUID == '{uid}'"
+        df = self.df_annotations.query(query_string)
 
-        # if df.shape[0] > 0:
-        #     for _, row in df.iterrows():
-        #         data = ast.literal_eval(row["data"])
-        #         ctr_cord = np.array([[np.array(x) for x in data]])
-        #         mask = cv2.polylines(mask, ctr_cord, isClosed=False, color=(255,), thickness=10)
-        #         annot_image = cv2.polylines(annot_image, ctr_cord, isClosed=False, color=COLOR_MAP[row["label"]], thickness=5)
+        if df.shape[0] > 0:
+            for _, row in df.iterrows():
+                data = ast.literal_eval(row["data"])
+                ctr_cord = np.array([[np.array(x) for x in data]])
+                # mask = cv2.polylines(mask, ctr_cord, isClosed=False, color=(255,), thickness=10)
+                annot_image = cv2.polylines(annot_image, ctr_cord, isClosed=False, color=COLOR_MAP[row["label"]], thickness=5)
 
-        tube_mask = cv2.imread(tube_mask_path, cv2.IMREAD_GRAYSCALE)
-        mask = tube_mask < 100
-        tube_mask[mask] = 0
+        # tube_mask = cv2.imread(tube_mask_path, cv2.IMREAD_GRAYSCALE)
+        # mask = tube_mask < 100
+        # tube_mask[mask] = 0
         if self.transform:
-            augmented = self.transform(image=image, mask=tube_mask)
-            tube_mask = augmented["mask"]
-            # annot_image = augmented["image_annot"]
+            augmented = self.transform(image=image, image_annot=annot_image)
+            # tube_mask = augmented["mask"]
+            annot_image = augmented["image_annot"]
             image = augmented["image"]
-        tube_mask = tube_mask.unsqueeze(0).float() / 255.0
+        # tube_mask = tube_mask.unsqueeze(0).float() / 255.0
 
-        return image, tube_mask, self.labels[idx]
+        return image, annot_image, self.labels[idx]

@@ -19,9 +19,10 @@ from sklearn.model_selection import StratifiedKFold, GroupKFold, KFold
 import albumentations as a_transform
 from albumentations.pytorch import ToTensorV2
 
-device = "cuda:0" if torch.cuda.is_available() else "cpu"
+device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 WORKDIR = "../data/ranczr"
 # WORKDIR = "/home/jun/project/data/ranzcr-clip-catheter-line-classification"
+torch.backends.cudnn.benchmark = True
 
 
 def train_loop(folds, fold):
@@ -72,20 +73,26 @@ def train_loop(folds, fold):
     # ====================================================
     # model & optimizer
     # ====================================================
-    resume_path = f"results/stage2/{CFG.model_name}_fold{fold}_S2_best.pth"
+    resume_path = f"results/stage2-effb5/{CFG.model_name}_fold{fold}_S2_best.pth"
     check_point = torch.load(resume_path)
     # model = EffNetWLF(CFG.model_name, CFG.target_size)
-    model = EffNetWLF("efficientnet-b5", CFG.target_size, check_point["model"])
+    model = EffNetWLF(CFG.model_name, CFG.target_size)
+    if torch.cuda.device_count() > 1:
+        model = nn.DataParallel(model)
+    model.load_state_dict(check_point["model"])
 
-    model = nn.DataParallel(model)
     model.to(device)
 
     # optimizer = Ranger(model.parameters(), lr=CFG.lr*0.1, weight_decay=CFG.weight_decay)
     pg_lr = [CFG.lr*0.5, CFG.lr*5, CFG.lr*5]
-    optimizer = torch.optim.Adam([{'params': model.module.backbone.parameters(), 'lr': pg_lr[0]},
-                                  {'params': model.module.classifier.parameters(), 'lr': pg_lr[1]},
-                                  {'params': model.module.local_fe.parameters(), 'lr': pg_lr[2]}], 
-                                  weight_decay=CFG.weight_decay)
+    # optimizer = torch.optim.Adam([{'params': model.module.backbone.parameters(), 'lr': pg_lr[0]},
+    #                               {'params': model.module.classifier.parameters(), 'lr': pg_lr[1]},
+    #                               {'params': model.module.local_fe.parameters(), 'lr': pg_lr[2]}], 
+    #                               weight_decay=CFG.weight_decay)
+    optimizer = Ranger([{'params': model.backbone.parameters(), 'lr': pg_lr[0]},
+                        {'params': model.classifier.parameters(), 'lr': pg_lr[1]},
+                        {'params': model.local_fe.parameters(), 'lr': pg_lr[2]}], 
+                        weight_decay=CFG.weight_decay)                                  
     # ====================================================
     # scheduler
     # ====================================================
@@ -94,7 +101,8 @@ def train_loop(folds, fold):
                                                     final_div_factor = CFG.final_div_factor,
                                                     cycle_momentum=False)
     # scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=CFG.epochs, eta_min=CFG.min_lr)
-    grad_scaler = torch.cuda.amp.GradScaler()
+    # grad_scaler = torch.cuda.amp.GradScaler()
+    grad_scaler = None
     
     # ====================================================
     # loop
@@ -134,8 +142,12 @@ def train_loop(folds, fold):
             if score > best_score:
                 best_score = score
             LOGGER.info(f"Epoch {epoch+1} - Save Best Loss: {best_loss:.4f} Best Score {best_score:.4f} Model")
-            torch.save({"model": model.module.state_dict(), "preds": preds, "optimizer": optimizer.state_dict()},
-                        f"{CFG.model_name}-LF-fold{fold}-best.pth")
+            if torch.cuda.device_count() > 1:
+                torch.save({"model": model.module.state_dict(), "preds": preds},
+                            f"{CFG.model_name}-LF-fold{fold}-best.pth")
+            else:
+                torch.save({"model": model.state_dict(), "preds": preds},
+                            f"{CFG.model_name}-LF-fold{fold}-best.pth")
         else:
             update_count += 1
             if update_count >= CFG.patience:
@@ -184,7 +196,7 @@ if __name__ == "__main__":
         debug = False
         print_freq = 100
         num_workers = 4
-        patience = 10
+        patience = 30
         refine_model = False
         model_name = "efficientnet-b5"
         backbone_name = "efficientnet-b2"
@@ -192,12 +204,12 @@ if __name__ == "__main__":
         # resume_path = "efficientnet-b5_fold1_S2_best.pth"
         size = 512
         scheduler = "CosineAnnealingLR"
-        epochs = 25
+        epochs = 30
         sch_step = [0.25, 0.25, 0.5]
-        lr = 0.0001
-        final_div_factor = 200
+        lr = 0.00025
+        final_div_factor = 300
         # min_lr = 0.000002
-        batch_size = 32
+        batch_size = 64
         weight_decay = 1e-6
         gradient_accumulation_steps = 1
         max_grad_norm = 1000
@@ -217,7 +229,7 @@ if __name__ == "__main__":
             "Swan Ganz Catheter Present",
         ]
         n_fold = 5
-        trn_fold = [1]
+        trn_fold = [3]
         train = True
 
     normalize = a_transform.Normalize(

@@ -141,7 +141,6 @@ class EffNetWLF(nn.Module):
         
         self.backbone.load_state_dict(new_state_dict)
 
-    @autocast()
     def forward(self, image):
         enc_feas = self.backbone.extract_features(image)
 
