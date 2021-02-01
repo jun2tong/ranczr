@@ -10,8 +10,7 @@ from torch.cuda.amp import autocast
 from torchvision import models
 from torchvision.models._utils import IntermediateLayerGetter
 from torchvision.models.segmentation.deeplabv3 import DeepLabHead
-from efficientnet_pytorch import EfficientNet
-from custom_mod.inception import inception_v3
+from efficientnet_pytorch import EfficientNet, model
 from custom_mod.bit_resnet import ResNetV2, get_weights
 from custom_mod.attention import CBAM
 import segmentation_models_pytorch as smp
@@ -55,7 +54,7 @@ class CustomXception(nn.Module):
 class CustomInceptionV3(nn.Module):
     def __init__(self, target_size=11):
         super().__init__()
-        self.model = inception_v3(pretrained=True)
+        self.model = timm.create_model("inception_v3", pretrained=False, features_only=True)
         n_features = self.model.fc.in_features
         self.model.fc = nn.Linear(n_features, target_size)
 
@@ -109,11 +108,39 @@ class RANCZRResNet200D(nn.Module):
         return output
 
 
+class CustomAttention(nn.Module):
+    
+    def __init__(self, model_name, target_size):
+        super().__init__()
+        self.backbone = timm.create_model(model_name, pretrained=False, features_only=True, out_indices=(4,))
+        self.num_feas = self.backbone.feature_info.channels()[-1]
+
+        self.local_fe = CBAM(self.num_feas)
+        self.dropout = nn.Dropout(0.2)
+        self.global_pool = nn.AdaptiveAvgPool2d(1)
+        self.classifier = nn.Sequential(nn.Linear(self.num_feas+self.local_fe.inter_channels, self.num_feas),
+                                        # nn.BatchNorm1d(self.num_feas),
+                                        # nn.Dropout(0.2),
+                                        nn.ReLU(),
+                                        nn.Linear(self.num_feas, target_size))
+
+    def forward(self, x):
+        feas = self.backbone(x)[0]
+        glob_feas = self.global_pool(feas)
+        glob_feas = self.dropout(glob_feas.flatten(start_dim=1))
+
+        local_feas = self.local_fe(feas)
+        local_feas = self.dropout(torch.sum(local_feas, dim=[2,3]))
+
+        all_feas = torch.cat([glob_feas, local_feas], dim=1)
+        outputs = self.classifier(all_feas)
+        return outputs
+
 class EffNetWLF(nn.Module):
 
     def __init__(self, model_name, target_size=11, prev_weights=None):
         super().__init__()
-        self.backbone = EfficientNet.from_pretrained(model_name)
+        self.backbone = EfficientNet.from_name(model_name)
 
         self.backbone._dropout = nn.Dropout(0.1)
         n_features = self.backbone._fc.in_features
@@ -123,11 +150,12 @@ class EffNetWLF(nn.Module):
             self.load_from_pth(prev_weights)
             print("loaded previous weights")
 
+        self.backbone._fc = nn.Identity()
         self.local_fe = CBAM(n_features)
-        self.dropout = nn.Dropout(0.1)
-        self.classifier = nn.Sequential(nn.Linear(n_features + n_features, n_features),
+        self.dropout = nn.Dropout(0.2)
+
+        self.classifier = nn.Sequential(nn.Linear(n_features, n_features),
                                         nn.BatchNorm1d(n_features),
-                                        nn.Dropout(0.1),
                                         nn.ReLU(),
                                         nn.Linear(n_features, target_size))
 
@@ -148,14 +176,14 @@ class EffNetWLF(nn.Module):
         enc_feas = self.backbone.extract_features(image)
 
         # use default's global features
-        global_feas = self.backbone._avg_pooling(enc_feas)
-        global_feas = global_feas.flatten(start_dim=1)
-        global_feas = self.dropout(global_feas)
+        # global_feas = self.backbone._avg_pooling(enc_feas)
+        # global_feas = global_feas.flatten(start_dim=1)
+        # global_feas = self.dropout(global_feas)
 
         local_feas = self.local_fe(enc_feas)
         local_feas = torch.sum(local_feas, dim=[2,3])
         local_feas = self.dropout(local_feas)
 
-        all_feas = torch.cat([global_feas, local_feas], dim=1)
-        outputs = self.classifier(all_feas)
+        # all_feas = torch.cat([global_feas, local_feas], dim=1)
+        outputs = self.classifier(local_feas)
         return outputs

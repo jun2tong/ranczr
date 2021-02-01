@@ -83,11 +83,11 @@ class CBAM(nn.Module):
         self.channel_gate = CAM_Module(inter_channels)
         self.spatial_gate = PAM_Module(inter_channels)
 
-        self.conv2_c = nn.Sequential(nn.Conv2d(inter_channels, in_channels, 3, padding=1, bias=False),
-                                     nn.BatchNorm2d(in_channels),
+        self.conv2_c = nn.Sequential(nn.Conv2d(inter_channels, inter_channels, 3, padding=1, bias=False),
+                                     nn.BatchNorm2d(inter_channels),
                                      nn.ReLU())
-        self.conv2_a = nn.Sequential(nn.Conv2d(inter_channels, in_channels, 3, padding=1, bias=False),
-                                     nn.BatchNorm2d(in_channels),
+        self.conv2_a = nn.Sequential(nn.Conv2d(inter_channels, inter_channels, 3, padding=1, bias=False),
+                                     nn.BatchNorm2d(inter_channels),
                                      nn.ReLU())
 
     def forward(self, x):

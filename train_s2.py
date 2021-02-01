@@ -9,14 +9,14 @@ import torch
 import torch.nn as nn
 
 from optimizer import Ranger
-from dataset import AnnotDatasetS2, ValidDataset, AnnotDataset
+from dataset import AnnotDatasetS2, ValidDataset, TrainDataset
 from torch.utils.data import DataLoader
 from train_fcn import valid_fn, train_fn_s2, valid_fn_seg
 from utils import get_score, init_logger
 from losses import FocalLoss
 
 # from ranczr_models import CustomEffNet, CustomResNext, CustomXception, CustomInceptionV3
-from ranczr_models import RANCZRResNet200D, CustomEffNet, EffNetWLF
+from ranczr_models import RANCZRResNet200D, CustomAttention
 from sklearn.model_selection import StratifiedKFold, GroupKFold, KFold
 
 import albumentations as a_transform
@@ -41,14 +41,14 @@ def train_loop(folds, fold):
     train_folds = folds.loc[trn_idx].reset_index(drop=True)
     valid_folds = folds.loc[val_idx].reset_index(drop=True)
 
-    train_folds = train_folds[train_folds['StudyInstanceUID'].isin(train_annot['StudyInstanceUID'].unique())].reset_index(drop=True)
-    valid_folds = valid_folds[valid_folds['StudyInstanceUID'].isin(train_annot['StudyInstanceUID'].unique())].reset_index(drop=True)
+    # train_folds = train_folds[train_folds['StudyInstanceUID'].isin(train_annot['StudyInstanceUID'].unique())].reset_index(drop=True)
+    # valid_folds = valid_folds[valid_folds['StudyInstanceUID'].isin(train_annot['StudyInstanceUID'].unique())].reset_index(drop=True)
 
     valid_labels = valid_folds[CFG.target_cols].values
-    train_dataset = AnnotDatasetS2(WORKDIR, train_folds, train_annot, 
-                                   flip_transform=train_transform, 
-                                   target_cols=CFG.target_cols)
-    
+    # train_dataset = AnnotDatasetS2(WORKDIR, train_folds, train_annot, 
+    #                                flip_transform=train_transform, 
+    #                                target_cols=CFG.target_cols)
+    train_dataset = TrainDataset(WORKDIR, train_folds, transform=train_transform, target_cols=CFG.target_cols)
     valid_dataset = ValidDataset(WORKDIR, valid_folds, transform=valid_transform, target_cols=CFG.target_cols)
 
     train_loader = DataLoader(
@@ -72,50 +72,49 @@ def train_loop(folds, fold):
     # model & optimizer
     # ====================================================
     if CFG.segment_model:
-        student_model = EffNetWLF(CFG.model_name, CFG.target_size, torch.load(f"pre-trained/{CFG.model_name}_fold3_S2_best.pth")["model"])
+        # student_model = EffNetWLF(CFG.model_name, CFG.target_size, torch.load(f"pre-trained/{CFG.model_name}_fold3_S2_best.pth")["model"])
+        student_model = CustomAttention(CFG.model_name, CFG.target_size)
         aux_params = dict(pooling="avg",  # one of 'avg', 'max'
                           dropout=None,  # dropout ratio, default is None
                           activation=None,  # activation function, default is None
-                          classes=CFG.target_size,  # define number of output labels
-                         )
-        teacher_model = smp.Unet(CFG.model_name, classes=1, aux_params=aux_params)
+                          classes=CFG.target_size)  # define number of output labels
+
+        teacher_model = smp.Unet(CFG.teacher_model, classes=1, aux_params=aux_params)
         teacher_model = nn.DataParallel(teacher_model)
         teacher_model.load_state_dict(torch.load(f"results/stage1/vary1/{CFG.teacher_model}_fold{fold}_S1_best.pth")["model"])
         teacher_model = teacher_model.module
-        if torch.cuda.device_count() > 1:
-            student_model = nn.DataParallel(student_model)
-            teacher_model = nn.DataParallel(teacher_model)
-        student_model.to(device)
-        teacher_model.to(device)        
     else:
-        student_model = EffNetWLF(CFG.model_name)
+        student_model = CustomAttention(CFG.model_name, CFG.target_size)
         teacher_model = RANCZRResNet200D()
         teacher_model.load_state_dict(torch.load(f"pre-trained/resnet200d/resnet200d_fold{fold}.pth"))
-        if torch.cuda.device_count() > 1:
-            student_model = nn.DataParallel(student_model)
-            teacher_model = nn.DataParallel(teacher_model)
-        student_model.to(device)
-        teacher_model.to(device)
 
-    # teacher_model.load_state_dict(torch.load(f"results/stage1/{CFG.teacher_model}_fold{fold}_S1_best.pth")["model"])
-    # teacher_model = teacher_model.module
+    if torch.cuda.device_count() > 1:
+        student_model = nn.DataParallel(student_model)
+        teacher_model = nn.DataParallel(teacher_model)
+        LOGGER.info("Using two GPU")
+    student_model.to(device)
+    teacher_model.to(device)
+
     teacher_model.eval()
     for param in teacher_model.parameters():
         param.requires_grad = False
 
-    pg_lr = [CFG.lr*0.5, CFG.lr*5, CFG.lr*5]
-    optimizer = torch.optim.Adam([{'params': student_model.backbone.parameters(), 'lr': pg_lr[0]},
-                                  {'params': student_model.classifier.parameters(), 'lr': pg_lr[1]},
-                                  {'params': student_model.local_fe.parameters(), 'lr': pg_lr[2]}], 
-                                  weight_decay=CFG.weight_decay)
-    # optimizer = torch.optim.Adam(student_model.parameters(), lr=CFG.lr, weight_decay=CFG.weight_decay)
-    # optimizer = Ranger(student_model.parameters(), lr=CFG.lr * 0.1, weight_decay=CFG.weight_decay)
-    # step_var = int(CFG.epochs * CFG.sch_step[0])
+    pg_lr = [CFG.lr*0.5, CFG.lr*2, CFG.lr*2]
+    if torch.cuda.device_count()>1:
+        optimizer = torch.optim.Adam([{'params': student_model.module.backbone.parameters(), 'lr': pg_lr[0]},
+                                    {'params': student_model.module.classifier.parameters(), 'lr': pg_lr[1]},
+                                    {'params': student_model.module.local_fe.parameters(), 'lr': pg_lr[2]}], 
+                                    weight_decay=CFG.weight_decay)
+    else:
+        optimizer = torch.optim.Adam([{'params': student_model.backbone.parameters(), 'lr': pg_lr[0]},
+                                    {'params': student_model.classifier.parameters(), 'lr': pg_lr[1]},
+                                    {'params': student_model.local_fe.parameters(), 'lr': pg_lr[2]}], 
+                                    weight_decay=CFG.weight_decay)
+
     scheduler = torch.optim.lr_scheduler.OneCycleLR(optimizer, max_lr=pg_lr, epochs=CFG.epochs, 
                                                     steps_per_epoch=len(train_loader), 
                                                     final_div_factor = CFG.final_div_factor,
                                                     cycle_momentum=False)
-    # scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=CFG.epochs, eta_min=CFG.min_lr)
 
     criterion = {"cls": FocalLoss(alpha=1.8, gamma=1.2, logits=True), "seg": nn.BCEWithLogitsLoss()}
 
@@ -142,15 +141,19 @@ def train_loop(folds, fold):
         LOGGER.info(f"Epoch {epoch+1} - avg_train_loss: {avg_loss:.4f}  avg_val_loss: {avg_val_loss:.4f}  feas_loss: {feas_loss:.4f} cls_loss: {cls_loss:.4f} time: {elapsed:.0f}s")
         LOGGER.info(f"Epoch {epoch+1} - Score: {score:.4f}  Scores: {np.round(scores, decimals=4)}")
 
-        if avg_val_loss < best_loss or score > best_score:
+        if avg_val_loss < best_loss:
             update_count = 0
             if avg_val_loss < best_loss:
                 best_loss = avg_val_loss
             if score > best_score:
                 best_score = score
             LOGGER.info(f"Epoch {epoch+1} - Save Best Loss: {best_loss:.4f} Model")
-            torch.save({"model": student_model.state_dict(), "preds": preds}, 
-                        f"{CFG.model_name}_fold{fold}_S2_best.pth")
+            if torch.cuda.device_count() > 1:
+                torch.save({"model": student_model.module.state_dict(), "preds": preds}, 
+                            f"{CFG.model_name}_fold{fold}_S2_best.pth")
+            else:
+                torch.save({"model": student_model.state_dict(), "preds": preds}, 
+                           f"{CFG.model_name}_fold{fold}_S2_best.pth")
         else:
             update_count += 1
             if update_count >= CFG.patience:
@@ -200,18 +203,18 @@ if __name__ == "__main__":
         print_freq = 100
         num_workers = 4
         patience = 100
-        segment_model = True
-        model_name = "efficientnet-b2"
+        segment_model = False
+        model_name = "inception_v3"
         teacher_model = "efficientnet-b2"
         size = 512
         scheduler = "CosineAnnealingLR"
         epochs = 25
         sch_step = [0.3, 0.3, 0.4]
         # lr = 0.0008
-        lr = 0.0002
-        final_div_factor = 200
+        lr = 0.0005
+        final_div_factor = 500
         # min_lr = 0.000002
-        batch_size = 32
+        batch_size = 8
         weight_decay = 1e-6
         gradient_accumulation_steps = 1
         max_grad_norm = 1000
@@ -231,7 +234,7 @@ if __name__ == "__main__":
             "Swan Ganz Catheter Present",
         ]
         n_fold = 5
-        trn_fold = [3]
+        trn_fold = [2,3,4]
         train = True
 
     normalize = a_transform.Normalize(
@@ -247,8 +250,8 @@ if __name__ == "__main__":
             # a_transform.CLAHE(clip_limit=(1, 10), p=0.5),
             # a_transform.Rotate(limit=30),
             #    a_transform.RandomBrightnessContrast(p=0.2, brightness_limit=(-0.2, 0.2), contrast_limit=(-0.2, 0.2)),
-            a_transform.HueSaturationValue(p=0.5, hue_shift_limit=10, sat_shift_limit=10, val_shift_limit=10),
-            a_transform.ShiftScaleRotate(p=0.5, shift_limit=0.0625, scale_limit=0.2, rotate_limit=30),
+            # a_transform.HueSaturationValue(p=0.5, hue_shift_limit=10, sat_shift_limit=10, val_shift_limit=10),
+            # a_transform.ShiftScaleRotate(p=0.5, shift_limit=0.0625, scale_limit=0.2, rotate_limit=30),
             normalize,
             ToTensorV2(),
         ],

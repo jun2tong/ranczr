@@ -99,38 +99,28 @@ def train_loop(folds, fold):
     model = model.to(device)
 
     if CFG.resume:
-        # resume_path = f"results/stage2/{CFG.model_name}_fold{fold}_S2_best.pth"
-        resume_path = f"pre-trained/efficientnet-b2-LF-fold3-best.pth"
+        resume_path = f"results/stage2/{CFG.model_name}-LF-fold{fold}-best.pth"
         check_point = torch.load(resume_path)
         model.load_state_dict(check_point["model"])
         LOGGER.info("Loaded correct head")
 
     # optimizer = torch.optim.Adam(model.parameters(), lr=CFG.lr, weight_decay=CFG.weight_decay)
     # optimizer = Ranger(model.parameters(), lr=CFG.lr, weight_decay=CFG.weight_decay)
-    pg_lr = [CFG.lr, CFG.lr*5, CFG.lr*5]
+    pg_lr = [CFG.lr, CFG.lr, CFG.lr]
     optimizer = Ranger([{'params': model.backbone.parameters(), 'lr': pg_lr[0]},
                         {'params': model.classifier.parameters(), 'lr': pg_lr[1]},
                         {'params': model.local_fe.parameters(), 'lr': pg_lr[2]}], 
                         weight_decay=CFG.weight_decay)
-    # step_var = int(CFG.epochs * CFG.sch_step[0])
+    # ====================================================
+    # scheduler
+    # ====================================================
+
     # scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=step_var, gamma=0.8)
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=CFG.epochs*len(train_loader), eta_min=CFG.min_lr)
     # scheduler = torch.optim.lr_scheduler.OneCycleLR(optimizer, max_lr=pg_lr, epochs=CFG.epochs, 
     #                                                 steps_per_epoch=len(train_loader), 
     #                                                 final_div_factor = CFG.final_div_factor,
     #                                                 cycle_momentum=False)
-
-    # ====================================================
-    # scheduler
-    # ====================================================
-    # def get_scheduler(optimizer):
-    #     if CFG.scheduler=='ReduceLROnPlateau':
-    #         scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=CFG.factor, patience=CFG.patience, verbose=True, eps=CFG.eps)
-    #     elif CFG.scheduler=='CosineAnnealingLR':
-    #         scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=CFG.T_max, eta_min=CFG.min_lr, last_epoch=-1)
-    #     elif CFG.scheduler=='CosineAnnealingWarmRestarts':
-    #         scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(optimizer, T_0=CFG.T_0, T_mult=1, eta_min=CFG.min_lr, last_epoch=-1)
-    #     return scheduler
 
     # ====================================================
     # loop
@@ -142,7 +132,6 @@ def train_loop(folds, fold):
     best_score = 0.0
     best_loss = np.inf
     update_count = 0
-    to_save = False
     # grad_scaler = torch.cuda.amp.GradScaler()
     grad_scaler = None
     # change_point = int(CFG.epochs * np.sum(CFG.sch_step[:-1]))
@@ -151,12 +140,6 @@ def train_loop(folds, fold):
     for epoch in range(CFG.epochs):
 
         start_time = time.time()
-        # if epoch == change_point:
-        #     start_lr = scheduler.get_last_lr()[0]
-        #     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=rem_step, eta_min=CFG.min_lr)
-        #     optimizer.param_groups[0]["lr"] = start_lr
-        #     scheduler._last_lr[0] = start_lr
-        #     LOGGER.info(f"Going into cosine regime with {rem_step} steps at lr: {scheduler.get_last_lr()[0]}")
 
         # train
         avg_loss = train_fn(train_loader, model, criterion, optimizer, epoch, scheduler, device, grad_scaler)
@@ -188,7 +171,7 @@ def train_loop(folds, fold):
                 LOGGER.info(f"Early Stopped at Epoch {epoch+1}")
                 break
 
-    check_point = torch.load(f"{CFG.model_name}_fold{fold}_best.pth")
+    check_point = torch.load(f"{CFG.model_name}wlf_fold{fold}_best.pth")
     for c in [f"pred_{c}" for c in CFG.target_cols]:
         valid_folds[c] = np.nan
     valid_folds[[f"pred_{c}" for c in CFG.target_cols]] = check_point["preds"]
@@ -232,7 +215,7 @@ if __name__ == "__main__":
         num_workers = 4
         patience = 11
         refine_model = False
-        model_name = "efficientnet-b2"
+        model_name = "efficientnet-b5"
         backbone_name = "efficientnet-b2"
         resume = True
         # resume_path = "efficientnet-b5_fold1_S2_best.pth"
@@ -242,7 +225,7 @@ if __name__ == "__main__":
         sch_step = [0.25, 0.25, 0.5]
         lr = 0.00003
         min_lr = 0.000001
-        final_div_factor = 500
+        final_div_factor = 300
         batch_size = 16
         weight_decay = 1e-5
         gradient_accumulation_steps = 1
@@ -263,7 +246,7 @@ if __name__ == "__main__":
             "Swan Ganz Catheter Present",
         ]
         n_fold = 5
-        trn_fold = [3]
+        trn_fold = [1]
         train = True
 
     normalize = a_transform.Normalize(

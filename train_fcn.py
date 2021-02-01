@@ -22,13 +22,13 @@ def train_fn(train_loader, model, criterion, optimizer, epoch, scheduler, device
         labels = labels.to(device)
         batch_size = labels.size(0)
 
-        img, targets_a, targets_b, lam = mixup_data(img, labels, 1.0, device)
+        # img, targets_a, targets_b, lam = mixup_data(img, labels, 1.0, device)
         optimizer.zero_grad()
         if scaler:
             with autocast():
                 y_preds = model(img)
-                loss = mixup_criterion(criterion["seg"], y_preds, targets_a, targets_b, lam)
-                # loss = criterion["seg"](y_preds, labels)
+                # loss = mixup_criterion(criterion["seg"], y_preds, targets_a, targets_b, lam)
+                loss = criterion["seg"](y_preds, labels)
                 scaler.scale(loss).backward()
                 scaler.unscale_(optimizer)
                 grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), 1000)
@@ -36,8 +36,8 @@ def train_fn(train_loader, model, criterion, optimizer, epoch, scheduler, device
                 scaler.update()
         else:
             y_preds = model(img)
-            loss = mixup_criterion(criterion["seg"], y_preds, targets_a, targets_b, lam)
-            # loss = criterion["seg"](y_preds, labels)
+            # loss = mixup_criterion(criterion["seg"], y_preds, targets_a, targets_b, lam)
+            loss = criterion["seg"](y_preds, labels)
             loss.backward()
             grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), 1000)
             optimizer.step()
@@ -121,26 +121,25 @@ def train_fn_s2(train_loader, teacher, model, optimizer, epoch, scheduler, devic
     # switch to train mode
     model.train()
     start = end = time.time()
-    for step, (img_mb, ant_img_mb, label_mb) in enumerate(train_loader):
+    for step, (img_mb, _, label_mb) in enumerate(train_loader):
         # measure data loading time
         data_time.update(time.time() - end)
 
         img_mb = img_mb.to(device)
-        ant_img_mb = ant_img_mb.to(device)
+        # ant_img_mb = ant_img_mb.to(device)
         batch_size = img_mb.size(0)
         # features matching
         with torch.no_grad():
-            _, teacher_feas = teacher(ant_img_mb)
+            teacher_feas = teacher(img_mb)
 
         optimizer.zero_grad()
-        # pdb.set_trace()
         # Model predictions
         if scaler:
             with autocast():
                 pred_y = model(img_mb)
                 teach_loss = F.mse_loss(pred_y, teacher_feas)
                 cls_loss = F.binary_cross_entropy_with_logits(pred_y, label_mb.to(device))
-                loss = cls_loss + 0.5 * teach_loss
+                loss = 0.5*teach_loss + cls_loss
             scaler.scale(loss).backward()
             scaler.unscale_(optimizer)
             grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), 1000)
@@ -150,7 +149,7 @@ def train_fn_s2(train_loader, teacher, model, optimizer, epoch, scheduler, devic
             pred_y = model(img_mb)
             teach_loss = F.mse_loss(pred_y, teacher_feas)
             cls_loss = F.binary_cross_entropy_with_logits(pred_y, label_mb.to(device))
-            loss = cls_loss + 0.5 * teach_loss
+            loss = 0.5*teach_loss + cls_loss
             loss.backward()
             grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), 1000)
             optimizer.step()
@@ -159,7 +158,7 @@ def train_fn_s2(train_loader, teacher, model, optimizer, epoch, scheduler, devic
 
         # Record Loss
         losses.update(loss.item(), batch_size)
-        feas_losses.update(teach_loss.item(), batch_size)
+        feas_losses.update(loss.item(), batch_size)
         cls_losses.update(cls_loss.item(), batch_size)        
         batch_time.update(time.time() - end)
         end = time.time()
