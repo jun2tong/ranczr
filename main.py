@@ -10,18 +10,18 @@ import sys
 from optimizer import Ranger
 from dataset import TrainDataset, ValidDataset
 from torch.utils.data import DataLoader
-from train_fcn import train_fn, valid_fn, train_fn_seg, valid_fn_seg
+from train_fcn import train_fn, valid_fn
 from utils import get_score, init_logger
 from losses import FocalLoss
-from ranczr_models import CustomResNext, CustomXception, CustomInceptionV3, SMPModel, EffNetWLF, CustomAttention
+from ranczr_models import CustomResNext, CustomXception, SMPModel, EffNetWLF, CustomAttention
 from sklearn.model_selection import GroupKFold
 
 import albumentations as a_transform
 from albumentations.pytorch import ToTensorV2
 
 device = "cuda:0" if torch.cuda.is_available() else "cpu"
-WORKDIR = "../data/ranczr"
-# WORKDIR = "/home/jun/project/data/ranzcr-clip-catheter-line-classification"
+# WORKDIR = "../data/ranczr"
+WORKDIR = "/home/jun/project/data/ranzcr-clip-catheter-line-classification"
 torch.backends.cudnn.benchmark = True
 
 
@@ -67,8 +67,6 @@ def train_loop(folds, fold):
     if "efficient" in CFG.model_name:
         model = EffNetWLF(CFG.model_name, target_size=CFG.target_size)
         CFG.resume_path = f"results/stage2-effb5/{CFG.model_name}-f{fold}-S2.pth"
-    elif "xception" in CFG.model_name:
-        model = CustomXception("pretrained_weights/xception-43020ad28.pth", target_size=CFG.target_size)
     elif "inception" in CFG.model_name:
         model = CustomAttention(CFG.model_name, CFG.target_size)
         CFG.resume_path = f"pre-trained/{CFG.model_name}.pth"
@@ -84,11 +82,11 @@ def train_loop(folds, fold):
             weight_dir = f"results/stage3/{CFG.backbone_name}_fold{fold}_S3_best.pth"
         model = SMPModel(CFG.backbone_name, aux_params, weight_dir)
     else:
-        model = CustomResNext(CFG.model_name, target_size=CFG.target_size)
+        model = CustomAttention(CFG.model_name, target_size=CFG.target_size)
 
     if CFG.resume:
         check_point = torch.load(CFG.resume_path)
-        model.backbone.load_state_dict(check_point["model"])
+        model.backbone.load_state_dict(check_point['model'])
         LOGGER.info(f"Loaded correct head for {CFG.model_name}")
 
     if torch.cuda.device_count() > 1:
@@ -211,10 +209,10 @@ if __name__ == "__main__":
         num_workers = 4
         patience = 30
         refine_model = False
-        model_name = "inception_v3"
+        model_name = "xception"
         backbone_name = "efficientnet-b2"
         resume = True
-        resume_path = "results/stage2-effb5/efficientnet-b5-f0-S2.pth"
+        resume_path = "pre-trained/xception.pth"
         size = 512
         scheduler = "CosineAnnealingLR"
         epochs = 30
@@ -223,7 +221,7 @@ if __name__ == "__main__":
         lr = 0.0005
         min_lr = 0.000001
         final_div_factor = 500
-        batch_size = 32
+        batch_size = 16
         weight_decay = 1e-6
         gradient_accumulation_steps = 1
         max_grad_norm = 1000
@@ -243,7 +241,7 @@ if __name__ == "__main__":
             "Swan Ganz Catheter Present",
         ]
         n_fold = 5
-        trn_fold = [3, 4]
+        trn_fold = [3]
         train = True
 
     normalize = a_transform.Normalize(

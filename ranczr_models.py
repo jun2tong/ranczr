@@ -88,7 +88,7 @@ class SMPModel(nn.Module):
 
 
 class RANCZRResNet200D(nn.Module):
-    def __init__(self, model_name="resnet200d", out_dim=11, pretrained=False):
+    def __init__(self, model_name="resnet200d", out_dim=11):
         super().__init__()
         self.model = timm.create_model(model_name, pretrained=False)
         n_features = self.model.fc.in_features
@@ -105,11 +105,30 @@ class RANCZRResNet200D(nn.Module):
         return output
 
 
+class MyEnsemble(nn.Module):
+    def __init__(self, weight_paths):
+        super(MyEnsemble, self).__init__()
+        self.model_lst = nn.ModuleList()
+        for each in weight_paths:
+            model = RANCZRResNet200D()
+            model.load_state_dict(torch.load(each))
+            for param in model.parameters():
+                param.requires_grad = False
+            self.model_lst.append(model)
+        
+    def forward(self, x):
+        preds = []
+        for mod in self.model_lst:
+            preds.append(mod(x).unsqueeze(0))
+        preds = torch.cat(preds, dim=0)
+        preds = torch.mean(preds, dim=0)
+        return preds
+
 class CustomAttention(nn.Module):
     
-    def __init__(self, model_name, target_size):
+    def __init__(self, model_name, target_size, pretrained=False):
         super().__init__()
-        self.backbone = timm.create_model(model_name, pretrained=False, features_only=True, out_indices=(4,))
+        self.backbone = timm.create_model(model_name, pretrained=pretrained, features_only=True, out_indices=(4,))
         self.num_feas = self.backbone.feature_info.channels()[-1]
 
         self.local_fe = CBAM(self.num_feas)

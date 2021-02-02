@@ -71,34 +71,35 @@ class CBAM(nn.Module):
     def __init__(self, in_channels):
         # def __init__(self):
         super(CBAM, self).__init__()
-        inter_channels = in_channels
-        self.conv1_c = nn.Sequential(nn.Conv2d(in_channels, inter_channels, 3, padding=1, bias=False),
-                                     nn.BatchNorm2d(inter_channels),
-                                     nn.ReLU())
+        # inter_channels = in_channels
+        # self.conv1_c = nn.Sequential(nn.Conv2d(in_channels, inter_channels, 3, padding=1, bias=False),
+        #                              nn.BatchNorm2d(inter_channels),
+        #                              nn.ReLU())
         
-        self.conv1_s = nn.Sequential(nn.Conv2d(in_channels, inter_channels, 3, padding=1, bias=False),
-                                     nn.BatchNorm2d(inter_channels),
-                                     nn.ReLU())
+        # self.conv1_s = nn.Sequential(nn.Conv2d(in_channels, inter_channels, 3, padding=1, bias=False),
+        #                              nn.BatchNorm2d(inter_channels),
+        #                              nn.ReLU())
 
-        self.channel_gate = CAM_Module(inter_channels)
-        self.spatial_gate = PAM_Module(inter_channels)
+        self.channel_gate = CAM_Module(in_channels)
+        self.spatial_gate = PAM_Module(in_channels)
 
-        self.conv2_c = nn.Sequential(nn.Conv2d(inter_channels, inter_channels, 3, padding=1, bias=False),
-                                     nn.BatchNorm2d(inter_channels),
+        self.conv2_c = nn.Sequential(nn.Conv2d(in_channels, in_channels, 1, padding=0, bias=False),
+                                     nn.BatchNorm2d(in_channels),
                                      nn.ReLU())
-        self.conv2_a = nn.Sequential(nn.Conv2d(inter_channels, inter_channels, 3, padding=1, bias=False),
-                                     nn.BatchNorm2d(inter_channels),
-                                     nn.ReLU())
+        # self.conv2_a = nn.Sequential(nn.Conv2d(in_channels, in_channels, 1, padding=0, bias=False),
+        #                              nn.BatchNorm2d(in_channels),
+        #                              nn.ReLU())
 
     def forward(self, x):
-        feat1 = self.conv1_c(x)
-        chnl_att = self.channel_gate(feat1)
-        chnl_att = self.conv2_c(chnl_att)
+        # feat1 = self.conv1_c(x)
+        chnl_att = self.channel_gate(x)
+        # chnl_att = self.conv2_c(chnl_att)
 
-        feat2 = self.conv1_s(x)
-        spat_att = self.spatial_gate(feat2)
-        spat_att = self.conv2_a(spat_att)
+        # feat2 = self.conv1_s(x)
+        spat_att = self.spatial_gate(x)
+        # spat_att = self.conv2_a(spat_att)
 
         x_out = chnl_att + spat_att
+        x_out = self.conv2_c(x_out)
 
         return x_out

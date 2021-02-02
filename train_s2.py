@@ -11,12 +11,11 @@ import torch.nn as nn
 from optimizer import Ranger
 from dataset import AnnotDatasetS2, ValidDataset, TrainDataset
 from torch.utils.data import DataLoader
-from train_fcn import valid_fn, train_fn_s2, valid_fn_seg
+from train_fcn import valid_fn, train_fn_s2
 from utils import get_score, init_logger
 from losses import FocalLoss
 
-# from ranczr_models import CustomEffNet, CustomResNext, CustomXception, CustomInceptionV3
-from ranczr_models import RANCZRResNet200D, CustomAttention
+from ranczr_models import RANCZRResNet200D, CustomAttention, MyEnsemble
 from sklearn.model_selection import StratifiedKFold, GroupKFold, KFold
 
 import albumentations as a_transform
@@ -85,8 +84,9 @@ def train_loop(folds, fold):
         teacher_model = teacher_model.module
     else:
         student_model = CustomAttention(CFG.model_name, CFG.target_size)
-        teacher_model = RANCZRResNet200D()
-        teacher_model.load_state_dict(torch.load(f"pre-trained/resnet200d/resnet200d_fold{fold}.pth"))
+        weight_path = [f"pre-trained/resnet200d/resnet200d_fold{num}.pth" for num in range(5)]
+        teacher_model = MyEnsemble(weight_path)
+        # teacher_model.load_state_dict(torch.load(f"pre-trained/resnet200d/resnet200d_fold{fold}.pth"))
 
     if torch.cuda.device_count() > 1:
         student_model = nn.DataParallel(student_model)
@@ -99,17 +99,17 @@ def train_loop(folds, fold):
     for param in teacher_model.parameters():
         param.requires_grad = False
 
-    pg_lr = [CFG.lr*0.5, CFG.lr*2, CFG.lr*2]
+    pg_lr = [CFG.lr*0.5, CFG.lr, CFG.lr]
     if torch.cuda.device_count()>1:
         optimizer = torch.optim.Adam([{'params': student_model.module.backbone.parameters(), 'lr': pg_lr[0]},
-                                    {'params': student_model.module.classifier.parameters(), 'lr': pg_lr[1]},
-                                    {'params': student_model.module.local_fe.parameters(), 'lr': pg_lr[2]}], 
-                                    weight_decay=CFG.weight_decay)
+                                      {'params': student_model.module.classifier.parameters(), 'lr': pg_lr[1]},
+                                      {'params': student_model.module.local_fe.parameters(), 'lr': pg_lr[2]}], 
+                                     weight_decay=CFG.weight_decay)
     else:
         optimizer = torch.optim.Adam([{'params': student_model.backbone.parameters(), 'lr': pg_lr[0]},
-                                    {'params': student_model.classifier.parameters(), 'lr': pg_lr[1]},
-                                    {'params': student_model.local_fe.parameters(), 'lr': pg_lr[2]}], 
-                                    weight_decay=CFG.weight_decay)
+                                      {'params': student_model.classifier.parameters(), 'lr': pg_lr[1]},
+                                      {'params': student_model.local_fe.parameters(), 'lr': pg_lr[2]}], 
+                                      weight_decay=CFG.weight_decay)
 
     scheduler = torch.optim.lr_scheduler.OneCycleLR(optimizer, max_lr=pg_lr, epochs=CFG.epochs, 
                                                     steps_per_epoch=len(train_loader), 
@@ -204,17 +204,17 @@ if __name__ == "__main__":
         num_workers = 4
         patience = 100
         segment_model = False
-        model_name = "inception_v3"
+        model_name = "xception"
         teacher_model = "efficientnet-b2"
         size = 512
         scheduler = "CosineAnnealingLR"
-        epochs = 25
+        epochs = 30
         sch_step = [0.3, 0.3, 0.4]
         # lr = 0.0008
         lr = 0.0005
-        final_div_factor = 500
+        final_div_factor = 300
         # min_lr = 0.000002
-        batch_size = 64
+        batch_size = 32
         weight_decay = 1e-6
         gradient_accumulation_steps = 1
         max_grad_norm = 1000
@@ -234,7 +234,7 @@ if __name__ == "__main__":
             "Swan Ganz Catheter Present",
         ]
         n_fold = 5
-        trn_fold = [3,4]
+        trn_fold = [0]
         train = True
 
     normalize = a_transform.Normalize(

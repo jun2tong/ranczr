@@ -28,7 +28,6 @@ def train_fn(train_loader, model, criterion, optimizer, epoch, scheduler, device
             with autocast():
                 y_preds = model(img)
                 loss = mixup_criterion(criterion["cls"], y_preds, targets_a, targets_b, lam)
-                # loss = criterion["seg"](y_preds, labels)
                 scaler.scale(loss).backward()
                 scaler.unscale_(optimizer)
                 grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), 1000)
@@ -37,7 +36,6 @@ def train_fn(train_loader, model, criterion, optimizer, epoch, scheduler, device
         else:
             y_preds = model(img)
             loss = mixup_criterion(criterion["cls"], y_preds, targets_a, targets_b, lam)
-            # loss = criterion["seg"](y_preds, labels)
             loss.backward()
             grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), 1000)
             optimizer.step()
@@ -50,6 +48,57 @@ def train_fn(train_loader, model, criterion, optimizer, epoch, scheduler, device
         batch_time.update(time.time() - end)
         end = time.time()
         # if step % CFG.print_freq == 0 or step == (len(train_loader)-1):
+        if step % 100 == 0 or step == (len(train_loader) - 1):
+            print_str = (
+                f"Epoch: [{epoch+1}][{step}/{len(train_loader)}] "
+                f"Data {data_time.val:.3f} ({data_time.avg:.3f}) "
+                f"Elapsed {timeSince(start, float(step+1)/len(train_loader)):s} "
+                f"Loss: {losses.val:.4f}({losses.avg:.4f}) "
+                f"Grad: {grad_norm:.4f} lr: {scheduler.get_last_lr()[0]:.7f}"
+            )
+            print(print_str)
+    # scheduler.step()
+    return losses.avg
+
+
+def train_ft(train_loader, model, criterion, optimizer, epoch, scheduler, device, scaler=None):
+    batch_time = AverageMeter()
+    data_time = AverageMeter()
+    losses = AverageMeter()
+    # switch to train mode
+    model.train()
+    start = end = time.time()
+    for step, (x_mb, labels) in enumerate(train_loader):
+        # measure data loading time
+        data_time.update(time.time() - end)
+        img = x_mb.to(device)
+        labels = labels.to(device)
+        batch_size = labels.size(0)
+
+        optimizer.zero_grad()
+        if scaler:
+            with autocast():
+                y_preds = model(img)
+                loss = criterion["cls"](y_preds, labels)
+                scaler.scale(loss).backward()
+                scaler.unscale_(optimizer)
+                grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), 1000)
+                scaler.step(optimizer)
+                scaler.update()
+        else:
+            y_preds = model(img)
+            loss = criterion["cls"](y_preds, labels)
+            loss.backward()
+            grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), 1000)
+            optimizer.step()
+
+        # record loss
+        losses.update(loss.item(), batch_size)
+        scheduler.step()
+
+        # measure elapsed time
+        batch_time.update(time.time() - end)
+        end = time.time()
         if step % 100 == 0 or step == (len(train_loader) - 1):
             print_str = (
                 f"Epoch: [{epoch+1}][{step}/{len(train_loader)}] "
