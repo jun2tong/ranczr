@@ -33,48 +33,6 @@ class CustomResNext(nn.Module):
         return x
 
 
-class CustomXception(nn.Module):
-    def __init__(self, pretrained_path, target_size=11):
-        super().__init__()
-        self.model = timm.models.xception(pretrained=False)
-        if pretrained_path:
-            checkpoint = torch.load(pretrained_path)
-            self.model.load_state_dict(checkpoint)
-        n_features = self.model.fc.in_features
-        self.model.fc = nn.Linear(n_features, target_size)
-
-    def forward(self, x):
-        x = self.model(x)
-        return x
-
-
-class CustomInceptionV3(nn.Module):
-    def __init__(self, target_size=11):
-        super().__init__()
-        self.model = timm.create_model("inception_v3", pretrained=False, features_only=True)
-        n_features = self.model.fc.in_features
-        self.model.fc = nn.Linear(n_features, target_size)
-
-    def forward(self, x):
-        x = self.model(x)
-        return x
-
-
-class CustomEffNet(nn.Module):
-    def __init__(self, model_name, target_size=11):
-        super().__init__()
-        self.effnet = EfficientNet.from_pretrained(model_name)
-        # self.effnet = timm.create_model(model_name,pretrained=True,num_classes=target_size)
-
-        self.effnet._dropout = nn.Dropout(0.1)
-        n_features = self.effnet._fc.in_features
-        self.effnet._fc = nn.Linear(n_features, target_size)
-
-    def forward(self, image, targets=None):
-        outputs = self.effnet(image)
-        return outputs
-
-
 class SMPModel(nn.Module):
     def __init__(self, model_name, aux_dict, weight_dir):
         super().__init__()
@@ -115,7 +73,8 @@ class MyEnsemble(nn.Module):
             for param in model.parameters():
                 param.requires_grad = False
             self.model_lst.append(model)
-        
+
+    @autocast()
     def forward(self, x):
         preds = []
         for mod in self.model_lst:
@@ -126,11 +85,12 @@ class MyEnsemble(nn.Module):
 
 class CustomAttention(nn.Module):
     
-    def __init__(self, model_name, target_size, pretrained=False):
+    def __init__(self, model_name, target_size, pretrained=False, amp=False):
         super().__init__()
         self.backbone = timm.create_model(model_name, pretrained=pretrained, features_only=True, out_indices=(4,))
         self.num_feas = self.backbone.feature_info.channels()[-1]
 
+        self.use_amp = amp
         self.local_fe = CBAM(self.num_feas)
         self.dropout = nn.Dropout(0.2)
         self.global_pool = nn.AdaptiveAvgPool2d(1)
@@ -143,18 +103,19 @@ class CustomAttention(nn.Module):
         #                                 nn.Linear(self.num_feas, target_size))
 
     def forward(self, x):
-        feas = self.backbone(x)[0]
-        # glob_feas = self.global_pool(feas)
-        # glob_feas = self.dropout(glob_feas.flatten(start_dim=1))
+        with torch.cuda.amp.autocast(enable=self.use_amp):
+            feas = self.backbone(x)[0]
+            # glob_feas = self.global_pool(feas)
+            # glob_feas = self.dropout(glob_feas.flatten(start_dim=1))
 
-        all_feas = self.local_fe(feas)
-        all_feas = self.global_pool(all_feas)
-        all_feas = all_feas.flatten(start_dim=1)
-        all_feas = self.dropout(all_feas)
-        # local_feas = self.dropout(torch.sum(local_feas, dim=[2,3]))
+            all_feas = self.local_fe(feas)
+            all_feas = self.global_pool(all_feas)
+            all_feas = all_feas.flatten(start_dim=1)
+            all_feas = self.dropout(all_feas)
+            # local_feas = self.dropout(torch.sum(local_feas, dim=[2,3]))
 
-        # all_feas = torch.cat([glob_feas, local_feas], dim=1)
-        outputs = self.classifier(all_feas)
+            # all_feas = torch.cat([glob_feas, local_feas], dim=1)
+            outputs = self.classifier(all_feas)
         return outputs
 
 class EffNetWLF(nn.Module):

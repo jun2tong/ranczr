@@ -42,7 +42,7 @@ class TrainDataset(Dataset):
         file_name = self.img_idx[idx]
         file_path = f"{self.train_path}/{file_name}.jpg"
         image = cv2.imread(file_path, cv2.IMREAD_GRAYSCALE)
-        image = self.clahe.apply(image)
+        # image = self.clahe.apply(image)
         # image = reshape_img(image)
         image = cv2.cvtColor(image, cv2.COLOR_GRAY2RGB)
         # image = NeedleAugmentation(image, n_needles=2, dark_needles=False, p=0.3, needle_folder=self.needle_path)
@@ -72,7 +72,7 @@ class ValidDataset(Dataset):
         file_name = self.img_idx[idx]
         file_path = f"{self.train_path}/{file_name}.jpg"
         image = cv2.imread(file_path, cv2.IMREAD_GRAYSCALE)
-        image = self.clahe.apply(image)
+        # image = self.clahe.apply(image)
         # image = reshape_img(image)
         image = cv2.cvtColor(image, cv2.COLOR_GRAY2RGB)
 
