@@ -22,13 +22,13 @@ def train_fn(train_loader, model, criterion, optimizer, epoch, scheduler, device
         labels = labels.to(device)
         batch_size = labels.size(0)
 
-        # img, targets_a, targets_b, lam = mixup_data(img, labels, 1.0, device)
+        img, targets_a, targets_b, lam = mixup_data(img, labels, 1.0, device)
         optimizer.zero_grad()
         if scaler:
             with autocast():
                 y_preds = model(img)
-                # loss = mixup_criterion(criterion["seg"], y_preds, targets_a, targets_b, lam)
-                loss = criterion["seg"](y_preds, labels)
+                loss = mixup_criterion(criterion["cls"], y_preds, targets_a, targets_b, lam)
+                # loss = criterion["seg"](y_preds, labels)
                 scaler.scale(loss).backward()
                 scaler.unscale_(optimizer)
                 grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), 1000)
@@ -36,8 +36,8 @@ def train_fn(train_loader, model, criterion, optimizer, epoch, scheduler, device
                 scaler.update()
         else:
             y_preds = model(img)
-            # loss = mixup_criterion(criterion["seg"], y_preds, targets_a, targets_b, lam)
-            loss = criterion["seg"](y_preds, labels)
+            loss = mixup_criterion(criterion["cls"], y_preds, targets_a, targets_b, lam)
+            # loss = criterion["seg"](y_preds, labels)
             loss.backward()
             grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), 1000)
             optimizer.step()
@@ -121,7 +121,7 @@ def train_fn_s2(train_loader, teacher, model, optimizer, epoch, scheduler, devic
     # switch to train mode
     model.train()
     start = end = time.time()
-    for step, (img_mb, _, label_mb) in enumerate(train_loader):
+    for step, (img_mb, label_mb) in enumerate(train_loader):
         # measure data loading time
         data_time.update(time.time() - end)
 

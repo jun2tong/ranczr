@@ -7,10 +7,7 @@ import pdb
 from collections import OrderedDict
 from torch.nn import functional as F
 from torch.cuda.amp import autocast
-from torchvision import models
-from torchvision.models._utils import IntermediateLayerGetter
-from torchvision.models.segmentation.deeplabv3 import DeepLabHead
-from efficientnet_pytorch import EfficientNet, model
+from efficientnet_pytorch import EfficientNet
 from custom_mod.bit_resnet import ResNetV2, get_weights
 from custom_mod.attention import CBAM
 import segmentation_models_pytorch as smp
@@ -118,27 +115,32 @@ class CustomAttention(nn.Module):
         self.local_fe = CBAM(self.num_feas)
         self.dropout = nn.Dropout(0.2)
         self.global_pool = nn.AdaptiveAvgPool2d(1)
-        self.classifier = nn.Sequential(nn.Linear(self.num_feas+self.local_fe.inter_channels, self.num_feas),
-                                        # nn.BatchNorm1d(self.num_feas),
-                                        # nn.Dropout(0.2),
-                                        nn.ReLU(),
-                                        nn.Linear(self.num_feas, target_size))
+        self.classifier = nn.Linear(self.num_feas, target_size)
+
+        # self.classifier = nn.Sequential(nn.Linear(self.num_feas+self.local_fe.inter_channels, self.num_feas),
+        #                                 # nn.BatchNorm1d(self.num_feas),
+        #                                 # nn.Dropout(0.2),
+        #                                 nn.ReLU(),
+        #                                 nn.Linear(self.num_feas, target_size))
 
     def forward(self, x):
         feas = self.backbone(x)[0]
-        glob_feas = self.global_pool(feas)
-        glob_feas = self.dropout(glob_feas.flatten(start_dim=1))
+        # glob_feas = self.global_pool(feas)
+        # glob_feas = self.dropout(glob_feas.flatten(start_dim=1))
 
-        local_feas = self.local_fe(feas)
-        local_feas = self.dropout(torch.sum(local_feas, dim=[2,3]))
+        all_feas = self.local_fe(feas)
+        all_feas = self.global_pool(all_feas)
+        all_feas = all_feas.flatten(start_dim=1)
+        all_feas = self.dropout(all_feas)
+        # local_feas = self.dropout(torch.sum(local_feas, dim=[2,3]))
 
-        all_feas = torch.cat([glob_feas, local_feas], dim=1)
+        # all_feas = torch.cat([glob_feas, local_feas], dim=1)
         outputs = self.classifier(all_feas)
         return outputs
 
 class EffNetWLF(nn.Module):
 
-    def __init__(self, model_name, target_size=11, prev_weights=None):
+    def __init__(self, model_name, target_size=11):
         super().__init__()
         self.backbone = EfficientNet.from_name(model_name)
 
@@ -146,44 +148,30 @@ class EffNetWLF(nn.Module):
         n_features = self.backbone._fc.in_features
         self.backbone._fc = nn.Linear(n_features, target_size)
 
-        if prev_weights:
-            self.load_from_pth(prev_weights)
-            print("loaded previous weights")
-
-        self.backbone._fc = nn.Identity()
+        # self.backbone._fc = nn.Identity()
         self.local_fe = CBAM(n_features)
         self.dropout = nn.Dropout(0.2)
 
-        self.classifier = nn.Sequential(nn.Linear(n_features, n_features),
-                                        nn.BatchNorm1d(n_features),
-                                        nn.ReLU(),
-                                        nn.Linear(n_features, target_size))
+        self.classifier = nn.Linear(n_features, target_size)
 
-    def load_from_pth(self, weight_dict, remove=True):
-        if remove:
-            new_state_dict = OrderedDict()
-
-            for old_name, val in weight_dict.items():
-                new_lst = old_name.split(".")[2:]
-                new_name = ".".join(new_lst)
-                new_state_dict[new_name] = val
-        
-            self.backbone.load_state_dict(new_state_dict)
-        else:
-            self.backbone.load_state_dict(weight_dict)
+        # self.classifier = nn.Sequential(nn.Linear(n_features+self.local_fe.inter_channels, n_features),
+        #                                 nn.ReLU(),
+        #                                 nn.Linear(n_features, target_size))
 
     def forward(self, image):
         enc_feas = self.backbone.extract_features(image)
 
         # use default's global features
-        # global_feas = self.backbone._avg_pooling(enc_feas)
-        # global_feas = global_feas.flatten(start_dim=1)
-        # global_feas = self.dropout(global_feas)
+        global_feas = self.local_fe(enc_feas)
+        global_feas = self.backbone._avg_pooling(global_feas)
+        global_feas = global_feas.flatten(start_dim=1)
+        global_feas = self.dropout(global_feas)
 
-        local_feas = self.local_fe(enc_feas)
-        local_feas = torch.sum(local_feas, dim=[2,3])
-        local_feas = self.dropout(local_feas)
+        # local features
+        # local_feas = self.local_fe(enc_feas)
+        # local_feas = torch.sum(local_feas, dim=[2,3])
+        # local_feas = self.dropout(local_feas)
 
         # all_feas = torch.cat([global_feas, local_feas], dim=1)
-        outputs = self.classifier(local_feas)
+        outputs = self.classifier(global_feas)
         return outputs

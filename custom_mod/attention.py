@@ -71,7 +71,7 @@ class CBAM(nn.Module):
     def __init__(self, in_channels):
         # def __init__(self):
         super(CBAM, self).__init__()
-        inter_channels = in_channels // 4
+        inter_channels = in_channels
         self.conv1_c = nn.Sequential(nn.Conv2d(in_channels, inter_channels, 3, padding=1, bias=False),
                                      nn.BatchNorm2d(inter_channels),
                                      nn.ReLU())

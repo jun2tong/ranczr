@@ -8,20 +8,20 @@ import torch.nn as nn
 import sys
 
 from optimizer import Ranger
-from dataset import TrainDataset, SegDataset, AnnotDataset, ValidDataset
+from dataset import TrainDataset, ValidDataset
 from torch.utils.data import DataLoader
 from train_fcn import train_fn, valid_fn, train_fn_seg, valid_fn_seg
 from utils import get_score, init_logger
 from losses import FocalLoss
-from ranczr_models import CustomEffNet, CustomResNext, CustomXception, CustomInceptionV3, SMPModel, EffNetWLF
-from sklearn.model_selection import StratifiedKFold, GroupKFold, KFold
+from ranczr_models import CustomResNext, CustomXception, CustomInceptionV3, SMPModel, EffNetWLF, CustomAttention
+from sklearn.model_selection import GroupKFold
 
 import albumentations as a_transform
 from albumentations.pytorch import ToTensorV2
 
 device = "cuda:0" if torch.cuda.is_available() else "cpu"
-# WORKDIR = "../data/ranczr"
-WORKDIR = "/home/jun/project/data/ranzcr-clip-catheter-line-classification"
+WORKDIR = "../data/ranczr"
+# WORKDIR = "/home/jun/project/data/ranzcr-clip-catheter-line-classification"
 torch.backends.cudnn.benchmark = True
 
 
@@ -38,18 +38,8 @@ def train_loop(folds, fold):
     train_folds = folds.loc[trn_idx].reset_index(drop=True)
     valid_folds = folds.loc[val_idx].reset_index(drop=True)
 
-    # train_folds = train_folds[train_folds['StudyInstanceUID'].isin(train_annot['StudyInstanceUID'].unique())].reset_index(drop=True)
-    # valid_folds = valid_folds[valid_folds['StudyInstanceUID'].isin(train_annot['StudyInstanceUID'].unique())].reset_index(drop=True)
-
     valid_labels = valid_folds[CFG.target_cols].values
-    # train_dataset = AnnotDataset(WORKDIR, train_folds, train_annot,
-    #                            flip_transform=train_transform,
-    #                            target_cols=CFG.target_cols)
-    # valid_dataset = AnnotDataset(WORKDIR, valid_folds, train_annot,
-    #                            flip_transform=valid_transform,
-    #                            target_cols=CFG.target_cols)
-    # train_dataset = SegDataset(WORKDIR, train_folds, flip_transform=train_transform, target_cols=CFG.target_cols)
-    # valid_dataset = SegDataset(WORKDIR, valid_folds, flip_transform=valid_transform, target_cols=CFG.target_cols)
+
     train_dataset = TrainDataset(WORKDIR, train_folds, transform=train_transform, target_cols=CFG.target_cols)
     valid_dataset = ValidDataset(WORKDIR, valid_folds, transform=valid_transform, target_cols=CFG.target_cols)
 
@@ -75,12 +65,13 @@ def train_loop(folds, fold):
     # ====================================================
     # model = CustomResNext(CFG.model_name, pretrained=True, target_size=CFG.target_size)
     if "efficient" in CFG.model_name:
-        # model = CustomEffNet(CFG.model_name, target_size=CFG.target_size)
         model = EffNetWLF(CFG.model_name, target_size=CFG.target_size)
+        CFG.resume_path = f"results/stage2-effb5/{CFG.model_name}-f{fold}-S2.pth"
     elif "xception" in CFG.model_name:
         model = CustomXception("pretrained_weights/xception-43020ad28.pth", target_size=CFG.target_size)
     elif "inception" in CFG.model_name:
-        model = CustomInceptionV3(target_size=CFG.target_size)
+        model = CustomAttention(CFG.model_name, CFG.target_size)
+        CFG.resume_path = f"pre-trained/{CFG.model_name}.pth"
     elif "smp" in CFG.model_name:
         aux_params = dict(
             pooling="avg",  # one of 'avg', 'max'
@@ -95,28 +86,32 @@ def train_loop(folds, fold):
     else:
         model = CustomResNext(CFG.model_name, target_size=CFG.target_size)
 
-    # model = nn.DataParallel(model)
+    if CFG.resume:
+        check_point = torch.load(CFG.resume_path)
+        model.backbone.load_state_dict(check_point["model"])
+        LOGGER.info(f"Loaded correct head for {CFG.model_name}")
+
+    if torch.cuda.device_count() > 1:
+        model = nn.DataParallel(model)
     model = model.to(device)
 
-    if CFG.resume:
-        resume_path = f"results/stage2/{CFG.model_name}-LF-fold{fold}-best.pth"
-        check_point = torch.load(resume_path)
-        model.load_state_dict(check_point["model"])
-        LOGGER.info("Loaded correct head")
-
-    # optimizer = torch.optim.Adam(model.parameters(), lr=CFG.lr, weight_decay=CFG.weight_decay)
-    # optimizer = Ranger(model.parameters(), lr=CFG.lr, weight_decay=CFG.weight_decay)
-    pg_lr = [CFG.lr, CFG.lr, CFG.lr]
-    optimizer = Ranger([{'params': model.backbone.parameters(), 'lr': pg_lr[0]},
-                        {'params': model.classifier.parameters(), 'lr': pg_lr[1]},
-                        {'params': model.local_fe.parameters(), 'lr': pg_lr[2]}], 
-                        weight_decay=CFG.weight_decay)
+    pg_lr = [CFG.lr*0.5, CFG.lr, CFG.lr]
+    if torch.cuda.device_count() > 1:
+        optimizer = torch.optim.Adam([{'params': model.module.backbone.parameters(), 'lr': pg_lr[0]},
+                                      {'params': model.module.classifier.parameters(), 'lr': pg_lr[1]},
+                                      {'params': model.module.local_fe.parameters(), 'lr': pg_lr[2]}], 
+                                      weight_decay=CFG.weight_decay)
+    else:
+        optimizer = torch.optim.Adam([{'params': model.backbone.parameters(), 'lr': pg_lr[0]},
+                                      {'params': model.classifier.parameters(), 'lr': pg_lr[1]},
+                                      {'params': model.local_fe.parameters(), 'lr': pg_lr[2]}], 
+                                      weight_decay=CFG.weight_decay)
     # ====================================================
     # scheduler
     # ====================================================
 
-    # scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=step_var, gamma=0.8)
-    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=CFG.epochs*len(train_loader), eta_min=CFG.min_lr)
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=CFG.epochs*len(train_loader), 
+                                                           eta_min=CFG.min_lr)
     # scheduler = torch.optim.lr_scheduler.OneCycleLR(optimizer, max_lr=pg_lr, epochs=CFG.epochs, 
     #                                                 steps_per_epoch=len(train_loader), 
     #                                                 final_div_factor = CFG.final_div_factor,
@@ -126,7 +121,7 @@ def train_loop(folds, fold):
     # loop
     # ====================================================
     # criterion = nn.BCEWithLogitsLoss()
-    # criterion = {"cls": FocalLoss(alpha=1.5, logits=True), "seg": nn.BCEWithLogitsLoss()}
+    # criterion = {"cls": FocalLoss(alpha=1.2, gamma=1.1, logits=True), "seg": nn.BCEWithLogitsLoss()}
     criterion = {"cls": nn.BCEWithLogitsLoss(), "seg": nn.BCEWithLogitsLoss()}
 
     best_score = 0.0
@@ -134,9 +129,6 @@ def train_loop(folds, fold):
     update_count = 0
     # grad_scaler = torch.cuda.amp.GradScaler()
     grad_scaler = None
-    # change_point = int(CFG.epochs * np.sum(CFG.sch_step[:-1]))
-    # rem_step = int(CFG.epochs * (1.0 - np.sum(CFG.sch_step[:-1]))) + 1
-    # LOGGER.info(f"Change point: {change_point} Rem Steps: {rem_step}")
     for epoch in range(CFG.epochs):
 
         start_time = time.time()
@@ -154,17 +146,21 @@ def train_loop(folds, fold):
 
         elapsed = time.time() - start_time
 
-        LOGGER.info(f"Epoch {epoch+1} - avg_train_loss: {avg_loss:.4f}  avg_val_loss: {avg_val_loss:.4f}  time: {elapsed:.0f}s")
+        LOGGER.info(f"Epoch {epoch+1} - scheduler lr: {scheduler.get_last_lr()}  time: {elapsed:.0f}s")
+        LOGGER.info(f"Epoch {epoch+1} - avg_train_loss: {avg_loss:.4f}  avg_val_loss: {avg_val_loss:.4f}")
         LOGGER.info(f"Epoch {epoch+1} - Score: {score:.4f}  Scores: {np.round(scores, decimals=4)}")
 
-        if avg_val_loss < best_loss or score > best_score:
+        if avg_val_loss < best_loss:
             update_count = 0
             if avg_val_loss < best_loss:
                 best_loss = avg_val_loss
             if score > best_score:
                 best_score = score
             LOGGER.info(f"Epoch {epoch+1} - Save Best Loss: {best_loss:.4f} Model")
-            torch.save({"model": model.state_dict(), "preds": preds}, f"{CFG.model_name}wlf_fold{fold}_best.pth")
+            if torch.cuda.device_count() > 1:
+                torch.save({"model": model.module.state_dict(), "preds": preds}, f"{CFG.model_name}wlf_fold{fold}_best.pth")
+            else:
+                torch.save({"model": model.state_dict(), "preds": preds}, f"{CFG.model_name}wlf_fold{fold}_best.pth")
         else:
             update_count += 1
             if update_count >= CFG.patience:
@@ -213,21 +209,22 @@ if __name__ == "__main__":
         debug = False
         print_freq = 100
         num_workers = 4
-        patience = 11
+        patience = 30
         refine_model = False
-        model_name = "efficientnet-b5"
+        model_name = "inception_v3"
         backbone_name = "efficientnet-b2"
         resume = True
-        # resume_path = "efficientnet-b5_fold1_S2_best.pth"
+        resume_path = "results/stage2-effb5/efficientnet-b5-f0-S2.pth"
         size = 512
         scheduler = "CosineAnnealingLR"
-        epochs = 10
+        epochs = 30
         sch_step = [0.25, 0.25, 0.5]
-        lr = 0.00003
+        # lr = 0.00003
+        lr = 0.0005
         min_lr = 0.000001
-        final_div_factor = 300
-        batch_size = 16
-        weight_decay = 1e-5
+        final_div_factor = 500
+        batch_size = 32
+        weight_decay = 1e-6
         gradient_accumulation_steps = 1
         max_grad_norm = 1000
         seed = 5468
@@ -246,7 +243,7 @@ if __name__ == "__main__":
             "Swan Ganz Catheter Present",
         ]
         n_fold = 5
-        trn_fold = [1]
+        trn_fold = [3, 4]
         train = True
 
     normalize = a_transform.Normalize(
@@ -258,20 +255,20 @@ if __name__ == "__main__":
         [
             a_transform.RandomResizedCrop(CFG.size, CFG.size, scale=(0.9, 1.0), p=1),
             a_transform.HorizontalFlip(p=0.5),
-            # a_transform.OneOf([a_transform.GaussNoise(var_limit=[10, 50]), a_transform.GaussianBlur()], p=0.5),
+            a_transform.OneOf([a_transform.GaussNoise(var_limit=[10, 50]), a_transform.GaussianBlur()], p=0.5),
             # a_transform.CLAHE(clip_limit=(1, 10), p=0.5),
             # a_transform.Rotate(limit=30),
             #    a_transform.RandomBrightnessContrast(p=0.2, brightness_limit=(-0.2, 0.2), contrast_limit=(-0.2, 0.2)),
-            # a_transform.HueSaturationValue(p=0.5, hue_shift_limit=10, sat_shift_limit=10, val_shift_limit=10),
-            # a_transform.ShiftScaleRotate(p=0.5, shift_limit=0.0625, scale_limit=0.2, rotate_limit=30),
+            a_transform.HueSaturationValue(p=0.5, hue_shift_limit=10, sat_shift_limit=10, val_shift_limit=10),
+            a_transform.ShiftScaleRotate(p=0.5, shift_limit=0.0625, scale_limit=0.2, rotate_limit=30),
             #    a_transform.CoarseDropout(p=0.2),
             #    a_transform.Cutout(p=0.2, max_h_size=8, max_w_size=8, fill_value=(0., 0., 0.), num_holes=8),
             #    a_transform.RandomSnow(p=0.3),
             #    a_transform.RandomContrast(),
             #    a_transform.RGBShift(),
-            # a_transform.OneOf(
-            #     [a_transform.JpegCompression(), a_transform.Downscale(scale_min=0.1, scale_max=0.15),], p=0.2,
-            # ),
+            a_transform.OneOf(
+                [a_transform.JpegCompression(), a_transform.Downscale(scale_min=0.1, scale_max=0.15),], p=0.2,
+            ),
             normalize,
             ToTensorV2(),
         ],

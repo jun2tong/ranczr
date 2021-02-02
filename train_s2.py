@@ -23,8 +23,8 @@ import albumentations as a_transform
 from albumentations.pytorch import ToTensorV2
 
 device = "cuda:0" if torch.cuda.is_available() else "cpu"
-# WORKDIR = "../data/ranczr"
-WORKDIR = "/home/jun/project/data/ranzcr-clip-catheter-line-classification"
+WORKDIR = "../data/ranczr"
+# WORKDIR = "/home/jun/project/data/ranzcr-clip-catheter-line-classification"
 torch.backends.cudnn.benchmark = True
 
 
@@ -214,7 +214,7 @@ if __name__ == "__main__":
         lr = 0.0005
         final_div_factor = 500
         # min_lr = 0.000002
-        batch_size = 8
+        batch_size = 64
         weight_decay = 1e-6
         gradient_accumulation_steps = 1
         max_grad_norm = 1000
@@ -234,7 +234,7 @@ if __name__ == "__main__":
             "Swan Ganz Catheter Present",
         ]
         n_fold = 5
-        trn_fold = [2,3,4]
+        trn_fold = [3,4]
         train = True
 
     normalize = a_transform.Normalize(
