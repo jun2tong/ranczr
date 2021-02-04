@@ -68,7 +68,7 @@ def train_loop(folds, fold):
     # ====================================================
     # model & optimizer
     # ====================================================
-    student_model = CustomAttention(CFG.model_name, CFG.target_size, pretrained=True, amp=torch.cuda.device_count()>1)
+    student_model = CustomAttention(CFG.model_name, CFG.target_size, pretrained=True)
     weight_path = [f"pre-trained/resnet200d/resnet200d_fold{num}.pth" for num in range(5)]
     teacher_model = MyEnsemble(weight_path)
 
@@ -80,8 +80,8 @@ def train_loop(folds, fold):
     teacher_model.to(device)
 
     teacher_model.eval()
-    for param in teacher_model.parameters():
-        param.requires_grad = False
+    # for param in teacher_model.parameters():
+    #     param.requires_grad = False
 
     pg_lr = [CFG.lr*0.5, CFG.lr, CFG.lr]
     if torch.cuda.device_count()>1:
@@ -102,8 +102,8 @@ def train_loop(folds, fold):
 
     criterion = {"cls": FocalLoss(alpha=1.8, gamma=1.2, logits=True), "seg": nn.BCEWithLogitsLoss()}
 
-    grad_scaler = torch.cuda.amp.GradScaler()
-    # grad_scaler = None
+    # grad_scaler = torch.cuda.amp.GradScaler()
+    grad_scaler = None
     best_score = 0.0
     best_loss = np.inf
     update_count = 0
@@ -122,6 +122,7 @@ def train_loop(folds, fold):
 
         elapsed = time.time() - start_time
 
+        LOGGER.info(f"Epoch {epoch+1} - lr: {scheduler.get_last_lr()}")
         LOGGER.info(f"Epoch {epoch+1} - avg_train_loss: {avg_loss:.4f}  avg_val_loss: {avg_val_loss:.4f} time: {elapsed:.0f}s")
         LOGGER.info(f"Epoch {epoch+1} - Score: {score:.4f}  Scores: {np.round(scores, decimals=4)}")
 
@@ -186,7 +187,7 @@ if __name__ == "__main__":
         debug = False
         num_workers = 4
         patience = 100
-        model_name = "swsl_resnext101_32x4d"
+        model_name = "xception"
         size = 512
         epochs = 30
         sch_step = [0.3, 0.3, 0.4]
@@ -214,7 +215,7 @@ if __name__ == "__main__":
             "Swan Ganz Catheter Present",
         ]
         n_fold = 5
-        trn_fold = [0]
+        trn_fold = [2]
         train = True
 
     normalize = a_transform.Normalize(

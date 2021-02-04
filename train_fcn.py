@@ -179,28 +179,21 @@ def train_fn_s2(train_loader, teacher, model, optimizer, epoch, scheduler, devic
         batch_size = img_mb.size(0)
         # features matching
         with torch.no_grad():
-            teacher_feas = teacher(img_mb)
+            teacher_feas = torch.sigmoid(teacher(img_mb))
 
         optimizer.zero_grad()
         # Model predictions
         if scaler:
             with autocast():
                 pred_y = model(img_mb)
-                loss = F.mse_loss(pred_y, teacher_feas)
-                # cls_loss = F.binary_cross_entropy_with_logits(pred_y, label_mb.to(device))
-                # loss = 0.5*teach_loss + cls_loss
+                loss = F.binary_cross_entropy_with_logits(pred_y, teacher_feas)
             scaler.scale(loss).backward()
-            scaler.unscale_(optimizer)
-            grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), 1000)
             scaler.step(optimizer)
             scaler.update()
         else:
             pred_y = model(img_mb)
-            loss = F.mse_loss(pred_y, teacher_feas)
-            # cls_loss = F.binary_cross_entropy_with_logits(pred_y, label_mb.to(device))
-            # loss = 0.5*teach_loss + cls_loss
+            loss = F.binary_cross_entropy_with_logits(pred_y, teacher_feas)
             loss.backward()
-            grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), 1000)
             optimizer.step()
         
         scheduler.step()
@@ -218,8 +211,8 @@ def train_fn_s2(train_loader, teacher, model, optimizer, epoch, scheduler, devic
                 f"Data {data_time.val:.3f} ({data_time.avg:.3f}) "
                 f"Elapsed {timeSince(start, float(step+1)/len(train_loader)):s} "
                 f"Loss: {losses.val:.4f}({losses.avg:.4f}) "
-                f"Breakdown: [{feas_losses.val:.4f}][{cls_losses.val:.4f}] "
-                f"Grad: {grad_norm:.4f} lr: {scheduler.get_last_lr()[0]:.6f}"
+                # f"Breakdown: [{feas_losses.val:.4f}][{cls_losses.val:.4f}] "
+                f"lr: {scheduler.get_last_lr()[0]:.6f}"
             )
             print(print_str)
     # scheduler.step()

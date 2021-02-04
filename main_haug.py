@@ -13,13 +13,13 @@ from torch.utils.data import DataLoader
 from train_fcn import train_fn, valid_fn
 from utils import get_score, init_logger
 from losses import FocalLoss
-from ranczr_models import CustomResNext, CustomXception, SMPModel, EffNetWLF, CustomAttention
+from ranczr_models import SMPModel, EffNetWLF, CustomAttention
 from sklearn.model_selection import GroupKFold
 
 import albumentations as a_transform
 from albumentations.pytorch import ToTensorV2
 
-device = "cuda:0" if torch.cuda.is_available() else "cpu"
+device = "cuda:1" if torch.cuda.is_available() else "cpu"
 # WORKDIR = "../data/ranczr"
 WORKDIR = "/home/jun/project/data/ranzcr-clip-catheter-line-classification"
 torch.backends.cudnn.benchmark = True
@@ -67,9 +67,6 @@ def train_loop(folds, fold):
     if "efficient" in CFG.model_name:
         model = EffNetWLF(CFG.model_name, target_size=CFG.target_size)
         CFG.resume_path = f"results/stage2-effb5/{CFG.model_name}-f{fold}-S2.pth"
-    elif "inception" in CFG.model_name:
-        model = CustomAttention(CFG.model_name, CFG.target_size)
-        CFG.resume_path = f"pre-trained/{CFG.model_name}.pth"
     elif "smp" in CFG.model_name:
         aux_params = dict(
             pooling="avg",  # one of 'avg', 'max'
@@ -82,11 +79,11 @@ def train_loop(folds, fold):
             weight_dir = f"results/stage3/{CFG.backbone_name}_fold{fold}_S3_best.pth"
         model = SMPModel(CFG.backbone_name, aux_params, weight_dir)
     else:
-        model = CustomAttention(CFG.model_name, target_size=CFG.target_size, pretrained=True)
+        model = CustomAttention(CFG.model_name, target_size=CFG.target_size, pretrained=False)
 
     if CFG.resume:
-        check_point = torch.load(CFG.resume_path)
-        model.backbone.load_state_dict(check_point['model'])
+        checkpoint = torch.load(CFG.resume_path)
+        model.load_state_dict(checkpoint['model'])
         LOGGER.info(f"Loaded correct head for {CFG.model_name}")
 
     if torch.cuda.device_count() > 1:
@@ -119,8 +116,8 @@ def train_loop(folds, fold):
     # loop
     # ====================================================
     # criterion = nn.BCEWithLogitsLoss()
-    # criterion = {"cls": FocalLoss(alpha=1.2, gamma=1.1, logits=True), "seg": nn.BCEWithLogitsLoss()}
-    criterion = {"cls": nn.BCEWithLogitsLoss(), "seg": nn.BCEWithLogitsLoss()}
+    criterion = {"cls": FocalLoss(alpha=1.2, gamma=1.2, logits=True), "seg": nn.BCEWithLogitsLoss()}
+    # criterion = {"cls": nn.BCEWithLogitsLoss(), "seg": nn.BCEWithLogitsLoss()}
 
     best_score = 0.0
     best_loss = np.inf
@@ -136,7 +133,7 @@ def train_loop(folds, fold):
         # avg_loss = train_fn_seg(train_loader, model, criterion, optimizer, epoch, scheduler, device)
 
         # eval
-        avg_val_loss, preds = valid_fn(valid_loader, model, criterion["seg"], device)
+        avg_val_loss, preds = valid_fn(valid_loader, model, criterion["cls"], device)
         # avg_val_loss, preds = valid_fn_seg(valid_loader, model, criterion, device)
 
         # scoring
@@ -156,16 +153,16 @@ def train_loop(folds, fold):
                 best_score = score
             LOGGER.info(f"Epoch {epoch+1} - Save Best Loss: {best_loss:.4f} Model")
             if torch.cuda.device_count() > 1:
-                torch.save({"model": model.module.state_dict(), "preds": preds}, f"{CFG.model_name}wlf_fold{fold}_best.pth")
+                torch.save({"model": model.module.state_dict(), "preds": preds}, f"{CFG.model_name}_f{fold}_haug.pth")
             else:
-                torch.save({"model": model.state_dict(), "preds": preds}, f"{CFG.model_name}wlf_fold{fold}_best.pth")
+                torch.save({"model": model.state_dict(), "preds": preds}, f"{CFG.model_name}_f{fold}_haug.pth")
         else:
             update_count += 1
             if update_count >= CFG.patience:
                 LOGGER.info(f"Early Stopped at Epoch {epoch+1}")
                 break
 
-    check_point = torch.load(f"{CFG.model_name}wlf_fold{fold}_best.pth")
+    check_point = torch.load(f"{CFG.model_name}_f{fold}_haug.pth")
     for c in [f"pred_{c}" for c in CFG.target_cols]:
         valid_folds[c] = np.nan
     valid_folds[[f"pred_{c}" for c in CFG.target_cols]] = check_point["preds"]
@@ -209,16 +206,16 @@ if __name__ == "__main__":
         num_workers = 4
         patience = 30
         refine_model = False
-        model_name = "swsl_resnext50_32x4d"
+        model_name = "xception"
         backbone_name = "efficientnet-b2"
-        resume = False
-        resume_path = "pre-trained/xception.pth"
+        resume = True
+        resume_path = "results/stage2-grp-distill/submission/xception.pth"
         size = 512
         scheduler = "CosineAnnealingLR"
         epochs = 30
         sch_step = [0.25, 0.25, 0.5]
         # lr = 0.00003
-        lr = 0.0008
+        lr = 0.0003
         min_lr = 0.000001
         final_div_factor = 300
         batch_size = 16
@@ -241,7 +238,7 @@ if __name__ == "__main__":
             "Swan Ganz Catheter Present",
         ]
         n_fold = 5
-        trn_fold = [0]
+        trn_fold = [2]
         train = True
 
     normalize = a_transform.Normalize(
@@ -256,7 +253,7 @@ if __name__ == "__main__":
             # a_transform.CLAHE(clip_limit=(1, 10), p=0.5),
             # a_transform.Rotate(limit=30),
             a_transform.RandomBrightnessContrast(p=0.2, brightness_limit=(-0.2, 0.2), contrast_limit=(-0.2, 0.2)),
-            a_transform.HueSaturationValue(p=0.5, hue_shift_limit=10, sat_shift_limit=10, val_shift_limit=10),
+            # a_transform.HueSaturationValue(p=0.5, hue_shift_limit=10, sat_shift_limit=10, val_shift_limit=10),
             a_transform.ShiftScaleRotate(p=0.5, shift_limit=0.0625, scale_limit=0.2, rotate_limit=30),
             a_transform.CoarseDropout(p=0.2),
             a_transform.Cutout(p=0.2, max_h_size=8, max_w_size=8, fill_value=(0., 0., 0.), num_holes=8),
@@ -273,7 +270,7 @@ if __name__ == "__main__":
 
     if not os.path.exists("./"):
         os.makedirs("./")
-    LOGGER = init_logger(f"{CFG.model_name}-fold{CFG.trn_fold[0]}.log")
+    LOGGER = init_logger(f"{CFG.model_name}-f{CFG.trn_fold[0]}.log")
 
     train_csv = pd.read_csv(os.path.join(WORKDIR, "train.csv"))
     weird_uid = "1.2.826.0.1.3680043.8.498.93345761486297843389996628528592497280"

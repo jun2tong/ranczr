@@ -69,12 +69,11 @@ class MyEnsemble(nn.Module):
         self.model_lst = nn.ModuleList()
         for each in weight_paths:
             model = RANCZRResNet200D()
-            model.load_state_dict(torch.load(each))
+            model.load_state_dict(torch.load(each, map_location="cpu"))
             for param in model.parameters():
                 param.requires_grad = False
             self.model_lst.append(model)
 
-    @autocast()
     def forward(self, x):
         preds = []
         for mod in self.model_lst:
@@ -103,19 +102,18 @@ class CustomAttention(nn.Module):
         #                                 nn.Linear(self.num_feas, target_size))
 
     def forward(self, x):
-        with torch.cuda.amp.autocast(enable=self.use_amp):
-            feas = self.backbone(x)[0]
-            # glob_feas = self.global_pool(feas)
-            # glob_feas = self.dropout(glob_feas.flatten(start_dim=1))
+        feas = self.backbone(x)[0]
+        # glob_feas = self.global_pool(feas)
+        # glob_feas = self.dropout(glob_feas.flatten(start_dim=1))
 
-            all_feas = self.local_fe(feas)
-            all_feas = self.global_pool(all_feas)
-            all_feas = all_feas.flatten(start_dim=1)
-            all_feas = self.dropout(all_feas)
-            # local_feas = self.dropout(torch.sum(local_feas, dim=[2,3]))
+        all_feas = self.local_fe(feas)
+        all_feas = self.global_pool(all_feas)
+        all_feas = all_feas.flatten(start_dim=1)
+        all_feas = self.dropout(all_feas)
+        # local_feas = self.dropout(torch.sum(local_feas, dim=[2,3]))
 
-            # all_feas = torch.cat([glob_feas, local_feas], dim=1)
-            outputs = self.classifier(all_feas)
+        # all_feas = torch.cat([glob_feas, local_feas], dim=1)
+        outputs = self.classifier(all_feas)
         return outputs
 
 class EffNetWLF(nn.Module):
