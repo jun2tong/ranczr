@@ -24,6 +24,28 @@ COLOR_MAP = {
 }
 
 
+class TrainMoCoDataset(Dataset):
+    def __init__(self, file_path, transform=None):
+        self.file_path = file_path
+        self.transform = transform
+
+    def __len__(self):
+        return len(self.file_path)
+
+    def __getitem__(self, idx):
+        file_name = self.file_path[idx]
+
+        image = cv2.imread(file_name, cv2.IMREAD_GRAYSCALE)
+        image = cv2.cvtColor(image, cv2.COLOR_GRAY2RGB)
+
+        img_q, img_k=None,None
+        if self.transform:
+            img_q = self.transform(image=image)['image']
+            img_k = self.transform(image=image)['image']
+
+        return img_q, img_k
+
+
 class TrainDataset(Dataset):
     def __init__(self, root, df, transform=None, target_cols=None):
         self.root = root

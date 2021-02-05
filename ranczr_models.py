@@ -153,3 +153,22 @@ class EffNetWLF(nn.Module):
         # all_feas = torch.cat([global_feas, local_feas], dim=1)
         outputs = self.classifier(global_feas)
         return outputs
+
+
+class CustomModel(nn.Module):
+    
+    def __init__(self, model_name, target_size):
+        super().__init__()
+        self.backbone = timm.create_model(model_name, pretrained=True, features_only=True, out_indices=(4,))
+        self.num_feas = self.backbone.feature_info.channels()[-1]
+
+        self.global_pool = nn.AdaptiveAvgPool2d(1)
+        self.fc = nn.Linear(self.num_feas, target_size)
+
+    def forward(self, x):
+        feas = self.backbone(x)[0]
+
+        all_feas = self.global_pool(feas)
+        all_feas = all_feas.flatten(start_dim=1)
+        outputs = self.fc(all_feas)
+        return outputs
