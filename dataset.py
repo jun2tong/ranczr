@@ -38,7 +38,7 @@ class TrainMoCoDataset(Dataset):
         image = cv2.imread(file_name, cv2.IMREAD_GRAYSCALE)
         image = cv2.cvtColor(image, cv2.COLOR_GRAY2RGB)
 
-        img_q, img_k=None,None
+        img_q, img_k=None, None
         if self.transform:
             img_q = self.transform(image=image)['image']
             img_k = self.transform(image=image)['image']

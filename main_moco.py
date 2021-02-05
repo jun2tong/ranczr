@@ -60,9 +60,9 @@ parser.add_argument('--schedule', default=[120, 160], nargs='*', type=int,
 parser.add_argument('--momentum', default=0.9, type=float, metavar='M',
                     help='momentum of SGD solver')
 parser.add_argument('--wd', '--weight-decay', default=1e-5, type=float,
-                    metavar='W', help='weight decay (default: 1e-4)',
+                    metavar='W', help='weight decay (default: 1e-5)',
                     dest='weight_decay')
-parser.add_argument('-p', '--print-freq', default=10, type=int,
+parser.add_argument('-p', '--print-freq', default=100, type=int,
                     metavar='N', help='print frequency (default: 10)')
 parser.add_argument('--resume', default='', type=str, metavar='PATH',
                     help='path to latest checkpoint (default: none)')
@@ -245,11 +245,12 @@ def main_worker(gpu, ngpus_per_node, args):
         transforms.RandomBrightnessContrast(p=0.2, brightness_limit=(-0.2, 0.2), contrast_limit=(-0.2, 0.2)),
         transforms.HueSaturationValue(p=0.2, hue_shift_limit=10, sat_shift_limit=10, val_shift_limit=10),
         transforms.ShiftScaleRotate(p=0.5, shift_limit=0.0625, scale_limit=0.2, rotate_limit=20),
+        transforms.Cutout(p=0.2, max_h_size=8, max_w_size=8, fill_value=(0., 0., 0.), num_holes=8),
         normalize,
         ToTensorV2()
     ]
 
-    train_transform = transforms.Compose([augmentation], p=1.0)
+    train_transform = transforms.Compose(augmentation, p=1.0)
     train_dataset = TrainMoCoDataset(traindir, train_transform)
     # train_dataset = datasets.ImageFolder(traindir,
     #     moco.loader.TwoCropsTransform(transforms.Compose(augmentation)))
@@ -287,10 +288,10 @@ def train(train_loader, model, criterion, optimizer, epoch, args):
     losses = AverageMeter('Loss', ':.4e')
     top1 = AverageMeter('Acc@1', ':6.2f')
     # top5 = AverageMeter('Acc@5', ':6.2f')
-    progress = ProgressMeter(
-        len(train_loader),
-        [batch_time, data_time, losses, top1],
-        prefix="Epoch: [{}]".format(epoch))
+    # progress = ProgressMeter(
+    #     len(train_loader),
+    #     [batch_time, data_time, losses, top1],
+    #     prefix=f"Epoch: [{epoch}]")
 
     # switch to train mode
     model.train()
@@ -316,7 +317,7 @@ def train(train_loader, model, criterion, optimizer, epoch, args):
         # TODO: fix here
         acc1 = accuracy(output, target, topk=(1,))
         losses.update(loss.item(), img_q.size(0))
-        top1.update(acc1[0], img_k.size(0))
+        top1.update(acc1[0].item(), img_k.size(0))
         # top5.update(acc5[0], images[0].size(0))
 
         # compute gradient and do SGD step
@@ -329,7 +330,8 @@ def train(train_loader, model, criterion, optimizer, epoch, args):
         end = time.time()
 
         if i % args.print_freq == 0:
-            progress.display(i)
+            print(f"Epc[{epoch}] step[{i+1}/{len(train_loader)}] Loss: ({losses.val:.4f})[{losses.avg:.4f}] Acc: ({top1.val:.4f})[{top1.avg:.4f}]")
+            # progress.display(i)
 
 
 def save_checkpoint(state, is_best, filename='checkpoint.pth.tar'):
