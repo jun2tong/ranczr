@@ -19,9 +19,9 @@ from sklearn.model_selection import GroupKFold
 import albumentations as a_transform
 from albumentations.pytorch import ToTensorV2
 
-device = "cuda:1" if torch.cuda.is_available() else "cpu"
-# WORKDIR = "../data/ranczr"
-WORKDIR = "/home/jun/project/data/ranzcr-clip-catheter-line-classification"
+device = "cuda:0" if torch.cuda.is_available() else "cpu"
+WORKDIR = "../data/ranczr"
+# WORKDIR = "/home/jun/project/data/ranzcr-clip-catheter-line-classification"
 torch.backends.cudnn.benchmark = True
 
 
@@ -116,8 +116,8 @@ def train_loop(folds, fold):
     # loop
     # ====================================================
     # criterion = nn.BCEWithLogitsLoss()
-    criterion = {"cls": FocalLoss(alpha=1.2, gamma=1.2, logits=True), "seg": nn.BCEWithLogitsLoss()}
-    # criterion = {"cls": nn.BCEWithLogitsLoss(), "seg": nn.BCEWithLogitsLoss()}
+    # criterion = {"cls": FocalLoss(alpha=1.2, gamma=1.2, logits=True), "seg": nn.BCEWithLogitsLoss()}
+    criterion = {"cls": nn.BCEWithLogitsLoss(), "seg": nn.BCEWithLogitsLoss()}
 
     best_score = 0.0
     best_loss = np.inf
@@ -206,7 +206,7 @@ if __name__ == "__main__":
         num_workers = 4
         patience = 30
         refine_model = False
-        model_name = "xception"
+        model_name = "swsl_resnext50_32x4d"
         backbone_name = "efficientnet-b2"
         resume = True
         resume_path = "results/stage2-grp-distill/submission/xception.pth"
@@ -215,11 +215,11 @@ if __name__ == "__main__":
         epochs = 30
         sch_step = [0.25, 0.25, 0.5]
         # lr = 0.00003
-        lr = 0.0003
+        lr = 0.0001
         min_lr = 0.000001
         final_div_factor = 300
         batch_size = 16
-        weight_decay = 1e-6
+        weight_decay = 1e-5
         gradient_accumulation_steps = 1
         max_grad_norm = 1000
         seed = 5468
@@ -238,7 +238,7 @@ if __name__ == "__main__":
             "Swan Ganz Catheter Present",
         ]
         n_fold = 5
-        trn_fold = [2]
+        trn_fold = [4]
         train = True
 
     normalize = a_transform.Normalize(

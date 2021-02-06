@@ -84,12 +84,11 @@ class MyEnsemble(nn.Module):
 
 class CustomAttention(nn.Module):
     
-    def __init__(self, model_name, target_size, pretrained=False, amp=False):
+    def __init__(self, model_name, target_size, pretrained=False):
         super().__init__()
         self.backbone = timm.create_model(model_name, pretrained=pretrained, features_only=True, out_indices=(4,))
         self.num_feas = self.backbone.feature_info.channels()[-1]
 
-        self.use_amp = amp
         self.local_fe = CBAM(self.num_feas)
         self.dropout = nn.Dropout(0.2)
         self.global_pool = nn.AdaptiveAvgPool2d(1)

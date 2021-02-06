@@ -187,7 +187,7 @@ if __name__ == "__main__":
         debug = False
         num_workers = 4
         patience = 100
-        model_name = "xception"
+        model_name = "swsl_resnext50_32x4d"
         size = 512
         epochs = 30
         sch_step = [0.3, 0.3, 0.4]
@@ -215,7 +215,7 @@ if __name__ == "__main__":
             "Swan Ganz Catheter Present",
         ]
         n_fold = 5
-        trn_fold = [2]
+        trn_fold = [1]
         train = True
 
     normalize = a_transform.Normalize(
