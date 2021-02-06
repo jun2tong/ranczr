@@ -74,8 +74,10 @@ def train_loop(folds, fold):
     # model & optimizer
     # ====================================================
     # resume_path = f"results/stage2-effb5/{CFG.model_name}_fold{fold}_S2_best.pth"
-    # model = EffNetWLF(CFG.model_name, CFG.target_size)
-    model = CustomAttention(CFG.model_name, CFG.target_size)
+    if "efficientnet" in CFG.model_name:
+        model = EffNetWLF(CFG.model_name, CFG.target_size)
+    else:
+        model = CustomAttention(CFG.model_name, CFG.target_size)
 
     if CFG.fine_tune:
         checkpoint = torch.load(CFG.resume_path)

@@ -13,7 +13,7 @@ from torch.utils.data import DataLoader
 from train_fcn import train_fn, valid_fn
 from utils import get_score, init_logger
 from losses import FocalLoss
-from ranczr_models import SMPModel, EffNetWLF, CustomAttention
+from ranczr_models import EffNetWLF, CustomAttention
 from sklearn.model_selection import GroupKFold
 
 import albumentations as a_transform
@@ -230,12 +230,11 @@ if __name__ == "__main__":
         mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225], p=1.0, max_pixel_value=255.0,
     )
 
-    train_transform = a_transform.Compose(
-        [
+    augmentation = [
             a_transform.RandomResizedCrop(CFG.size, CFG.size, scale=(0.9, 1.0), p=1),
             a_transform.HorizontalFlip(p=0.5),
             # a_transform.OneOf([a_transform.GaussNoise(var_limit=[10, 50]), a_transform.GaussianBlur()], p=0.5),
-            # a_transform.CLAHE(clip_limit=(1, 10), p=0.5),
+            a_transform.CLAHE(clip_limit=(1, 10), p=0.5),
             # a_transform.Rotate(limit=30),
             a_transform.RandomBrightnessContrast(p=0.2, brightness_limit=(-0.2, 0.2), contrast_limit=(-0.2, 0.2)),
             a_transform.HueSaturationValue(p=0.5, hue_shift_limit=10, sat_shift_limit=10, val_shift_limit=10),
@@ -247,9 +246,8 @@ if __name__ == "__main__":
             ),
             normalize,
             ToTensorV2(),
-        ],
-        p=1.0,
-    )
+        ]
+    train_transform = a_transform.Compose(augmentation, p=1.0)
 
     valid_transform = a_transform.Compose([a_transform.Resize(CFG.size, CFG.size), normalize, ToTensorV2()], p=1.0)
 

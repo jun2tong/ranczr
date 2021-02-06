@@ -105,8 +105,6 @@ def train_loop(folds, fold):
 
     criterion = {"cls": FocalLoss(alpha=1.8, gamma=1.2, logits=True), "seg": nn.BCEWithLogitsLoss()}
 
-    # grad_scaler = torch.cuda.amp.GradScaler()
-    grad_scaler = None
     best_score = 0.0
     best_loss = np.inf
     update_count = 0
@@ -115,7 +113,7 @@ def train_loop(folds, fold):
         start_time = time.time()
 
         # train
-        avg_loss, _, _ = train_fn_s2(train_loader, teacher_model, student_model, optimizer, epoch, scheduler, device, grad_scaler)
+        avg_loss, _, _ = train_fn_s2(train_loader, teacher_model, student_model, optimizer, epoch, scheduler, device, CFG.gradient_accumulation_steps)
 
         # eval
         avg_val_loss, preds = valid_fn(valid_loader, student_model, criterion["seg"], device)
@@ -198,9 +196,9 @@ if __name__ == "__main__":
         lr = 0.0008
         final_div_factor = 300
         # min_lr = 0.000002
-        batch_size = 32
+        batch_size = 16
         weight_decay = 1e-6
-        gradient_accumulation_steps = 1
+        gradient_accumulation_steps = 2
         max_grad_norm = 1000
         seed = 5468
         target_size = 11

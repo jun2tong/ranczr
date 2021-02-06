@@ -10,7 +10,7 @@ from torch.cuda.amp import autocast
 from efficientnet_pytorch import EfficientNet
 from custom_mod.bit_resnet import ResNetV2, get_weights
 from custom_mod.attention import CBAM
-import segmentation_models_pytorch as smp
+# import segmentation_models_pytorch as smp
 
 
 class CustomResNext(nn.Module):
@@ -33,16 +33,16 @@ class CustomResNext(nn.Module):
         return x
 
 
-class SMPModel(nn.Module):
-    def __init__(self, model_name, aux_dict, weight_dir):
-        super().__init__()
-        self.model = smp.Unet(model_name, classes=1, aux_params=aux_dict)
-        self.model.load_state_dict(torch.load(weight_dir)["model"])
+# class SMPModel(nn.Module):
+#     def __init__(self, model_name, aux_dict, weight_dir):
+#         super().__init__()
+#         self.model = smp.Unet(model_name, classes=1, aux_params=aux_dict)
+#         self.model.load_state_dict(torch.load(weight_dir)["model"])
 
-    def forward(self, x):
-        enc_out = self.model.encoder(x)
-        out = self.model.classification_head(enc_out[-1])
-        return out
+#     def forward(self, x):
+#         enc_out = self.model.encoder(x)
+#         out = self.model.classification_head(enc_out[-1])
+#         return out
 
 
 class RANCZRResNet200D(nn.Module):
@@ -94,24 +94,14 @@ class CustomAttention(nn.Module):
         self.global_pool = nn.AdaptiveAvgPool2d(1)
         self.classifier = nn.Linear(self.num_feas, target_size)
 
-        # self.classifier = nn.Sequential(nn.Linear(self.num_feas+self.local_fe.inter_channels, self.num_feas),
-        #                                 # nn.BatchNorm1d(self.num_feas),
-        #                                 # nn.Dropout(0.2),
-        #                                 nn.ReLU(),
-        #                                 nn.Linear(self.num_feas, target_size))
-
     def forward(self, x):
         feas = self.backbone(x)[0]
-        # glob_feas = self.global_pool(feas)
-        # glob_feas = self.dropout(glob_feas.flatten(start_dim=1))
 
         all_feas = self.local_fe(feas)
         all_feas = self.global_pool(all_feas)
         all_feas = all_feas.flatten(start_dim=1)
         all_feas = self.dropout(all_feas)
-        # local_feas = self.dropout(torch.sum(local_feas, dim=[2,3]))
 
-        # all_feas = torch.cat([glob_feas, local_feas], dim=1)
         outputs = self.classifier(all_feas)
         return outputs
 
@@ -125,12 +115,12 @@ class EffNetWLF(nn.Module):
             self.backbone = EfficientNet.from_name(model_name)
 
         self.backbone._dropout = nn.Dropout(0.1)
-        n_features = self.backbone._fc.in_features
-        self.backbone._fc = nn.Linear(n_features, target_size)
+        self.num_feas = self.backbone._fc.in_features
+        self.backbone._fc = nn.Identity()
 
-        # self.backbone._fc = nn.Identity()
-        self.local_fe = CBAM(n_features)
+        self.local_fe = CBAM(self.num_feas)
         self.dropout = nn.Dropout(0.1)
+        self.classifier = nn.Linear(self.num_feas, target_size)
 
     def forward(self, image):
         enc_feas = self.backbone.extract_features(image)
@@ -141,13 +131,7 @@ class EffNetWLF(nn.Module):
         global_feas = global_feas.flatten(start_dim=1)
         global_feas = self.backbone._dropout(global_feas)
 
-        # local features
-        # local_feas = self.local_fe(enc_feas)
-        # local_feas = torch.sum(local_feas, dim=[2,3])
-        # local_feas = self.dropout(local_feas)
-
-        # all_feas = torch.cat([global_feas, local_feas], dim=1)
-        outputs = self.backbone._fc(global_feas)
+        outputs = self.classifier(global_feas)
         return outputs
 
 

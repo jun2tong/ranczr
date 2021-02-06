@@ -152,7 +152,7 @@ def train_fn_seg(train_loader, model, criterion, optimizer, epoch, scheduler, de
     return losses.avg, seg_losses.avg, cls_losses.avg
 
 
-def train_fn_s2(train_loader, teacher, model, optimizer, epoch, scheduler, device, scaler):
+def train_fn_s2(train_loader, teacher, model, optimizer, epoch, scheduler, device, gradient_acc_step):
     batch_time = AverageMeter()
     data_time = AverageMeter()
     losses = AverageMeter()
@@ -161,6 +161,7 @@ def train_fn_s2(train_loader, teacher, model, optimizer, epoch, scheduler, devic
     # switch to train mode
     model.train()
     start = end = time.time()
+    optimizer.zero_grad()
     for step, (img_mb, label_mb) in enumerate(train_loader):
         # measure data loading time
         data_time.update(time.time() - end)
@@ -172,21 +173,27 @@ def train_fn_s2(train_loader, teacher, model, optimizer, epoch, scheduler, devic
         with torch.no_grad():
             teacher_feas = torch.sigmoid(teacher(img_mb))
 
-        optimizer.zero_grad()
         # Model predictions
         pred_y = model(img_mb)
         teach_loss = F.binary_cross_entropy_with_logits(pred_y, teacher_feas) 
         cls_loss = F.binary_cross_entropy_with_logits(pred_y, label_mb.to(device))
         loss = teach_loss + cls_loss
-        loss.backward()
-        optimizer.step()
-        
-        scheduler.step()
 
-        # Record Loss
+        # record loss
         losses.update(loss.item(), batch_size)
         feas_losses.update(teach_loss.item(), batch_size)
-        cls_losses.update(cls_loss.item(), batch_size)        
+        cls_losses.update(cls_loss.item(), batch_size)
+
+        if gradient_acc_step > 1:
+            loss = loss / gradient_acc_step
+
+        loss.backward()
+        if (step+1) % gradient_acc_step == 0:
+            optimizer.step()
+            optimizer.zero_grad()
+            scheduler.step()
+
+        # Record Loss
         batch_time.update(time.time() - end)
         end = time.time()
 
@@ -196,7 +203,7 @@ def train_fn_s2(train_loader, teacher, model, optimizer, epoch, scheduler, devic
                 f"Data {data_time.val:.3f} ({data_time.avg:.3f}) "
                 f"Elapsed {timeSince(start, float(step+1)/len(train_loader)):s} "
                 f"Loss: {losses.val:.4f}({losses.avg:.4f}) "
-                # f"Breakdown: [{feas_losses.val:.4f}][{cls_losses.val:.4f}] "
+                f"Breakdown: [{feas_losses.val:.4f}][{cls_losses.val:.4f}] "
                 f"lr: {scheduler.get_last_lr()[0]:.6f}"
             )
             print(print_str)
