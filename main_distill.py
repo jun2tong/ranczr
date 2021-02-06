@@ -13,7 +13,7 @@ from train_fcn import valid_fn, train_fn_s2
 from utils import get_score, init_logger
 from losses import FocalLoss
 
-from ranczr_models import RANCZRResNet200D, CustomAttention, MyEnsemble
+from ranczr_models import EffNetWLF, CustomAttention, MyEnsemble
 from sklearn.model_selection import GroupKFold
 
 import albumentations as a_transform
@@ -68,7 +68,10 @@ def train_loop(folds, fold):
     # ====================================================
     # model & optimizer
     # ====================================================
-    student_model = CustomAttention(CFG.model_name, CFG.target_size, pretrained=True)
+    if "efficient" in CFG.model_name:
+        student_model = EffNetWLF(CFG.model_name, target_size=CFG.target_size, pretrained=True)
+    else:    
+        student_model = CustomAttention(CFG.model_name, CFG.target_size, pretrained=True)
     weight_path = [f"pre-trained/resnet200d/resnet200d_fold{num}.pth" for num in range(5)]
     teacher_model = MyEnsemble(weight_path)
 
@@ -187,7 +190,7 @@ if __name__ == "__main__":
         debug = False
         num_workers = 4
         patience = 100
-        model_name = "swsl_resnext50_32x4d"
+        model_name = "efficientnet-b5"
         size = 512
         epochs = 30
         sch_step = [0.3, 0.3, 0.4]
@@ -215,7 +218,7 @@ if __name__ == "__main__":
             "Swan Ganz Catheter Present",
         ]
         n_fold = 5
-        trn_fold = [1]
+        trn_fold = [4]
         train = True
 
     normalize = a_transform.Normalize(

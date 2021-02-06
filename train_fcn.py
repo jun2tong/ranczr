@@ -7,14 +7,16 @@ import pdb
 from utils import AverageMeter, timeSince
 
 
-def train_fn(train_loader, model, criterion, optimizer, epoch, scheduler, device, scaler=None):
-    #     scaler = GradScaler()
+def train_fn(train_loader, model, criterion, optimizer, epoch, scheduler, device, gradient_acc_step=1):
+
     batch_time = AverageMeter()
     data_time = AverageMeter()
     losses = AverageMeter()
     # switch to train mode
     model.train()
     start = end = time.time()
+    # gradient_acc_step = 2
+    optimizer.zero_grad()
     for step, (x_mb, labels) in enumerate(train_loader):
         # measure data loading time
         data_time.update(time.time() - end)
@@ -23,23 +25,21 @@ def train_fn(train_loader, model, criterion, optimizer, epoch, scheduler, device
         batch_size = labels.size(0)
 
         img, targets_a, targets_b, lam = mixup_data(img, labels, 1.0, device)
-        optimizer.zero_grad()
-        if scaler:
-            with autocast():
-                y_preds = model(img)
-                loss = mixup_criterion(criterion["cls"], y_preds, targets_a, targets_b, lam)
-                scaler.scale(loss).backward()
-                scaler.step(optimizer)
-                scaler.update()
-        else:
-            y_preds = model(img)
-            loss = mixup_criterion(criterion["cls"], y_preds, targets_a, targets_b, lam)
-            loss.backward()
-            optimizer.step()
+
+        y_preds = model(img)
+        loss = mixup_criterion(criterion["cls"], y_preds, targets_a, targets_b, lam)
 
         # record loss
         losses.update(loss.item(), batch_size)
-        scheduler.step()
+
+        if gradient_acc_step > 1:
+            loss = loss / gradient_acc_step
+
+        loss.backward()
+        if (step+1) % gradient_acc_step == 0:
+            optimizer.step()
+            optimizer.zero_grad()
+            scheduler.step()
 
         # measure elapsed time
         batch_time.update(time.time() - end)
@@ -58,7 +58,7 @@ def train_fn(train_loader, model, criterion, optimizer, epoch, scheduler, device
     return losses.avg
 
 
-def train_ft(train_loader, model, criterion, optimizer, epoch, scheduler, device, scaler=None):
+def train_ft(train_loader, model, criterion, optimizer, epoch, scheduler, device, gradient_acc_step=1):
     batch_time = AverageMeter()
     data_time = AverageMeter()
     losses = AverageMeter()
@@ -73,27 +73,24 @@ def train_ft(train_loader, model, criterion, optimizer, epoch, scheduler, device
         batch_size = labels.size(0)
 
         optimizer.zero_grad()
-        if scaler:
-            with autocast():
-                y_preds = model(img)
-                loss = criterion["cls"](y_preds, labels)
-                scaler.scale(loss).backward()
-                scaler.step(optimizer)
-                scaler.update()
-        else:
-            y_preds = model(img)
-            loss = criterion["cls"](y_preds, labels)
-            loss.backward()
-            optimizer.step()
-
+        y_preds = model(img)
+        loss = criterion["cls"](y_preds, labels)
         # record loss
         losses.update(loss.item(), batch_size)
-        scheduler.step()
+
+        if gradient_acc_step > 1:
+            loss = loss / gradient_acc_step
+
+        loss.backward()
+        if (step+1) % gradient_acc_step == 0:
+            optimizer.step()
+            optimizer.zero_grad()
+            scheduler.step()
 
         # measure elapsed time
         batch_time.update(time.time() - end)
         end = time.time()
-        if step % 100 == 0 or step == (len(train_loader) - 1):
+        if step % 200 == 0 or step == (len(train_loader) - 1):
             print_str = (
                 f"Epoch: [{epoch+1}][{step}/{len(train_loader)}] "
                 f"Data {data_time.val:.3f} ({data_time.avg:.3f}) "
@@ -177,22 +174,12 @@ def train_fn_s2(train_loader, teacher, model, optimizer, epoch, scheduler, devic
 
         optimizer.zero_grad()
         # Model predictions
-        if scaler:
-            with autocast():
-                pred_y = model(img_mb)
-                teach_loss = F.binary_cross_entropy_with_logits(pred_y, teacher_feas) 
-                cls_loss = F.binary_cross_entropy_with_logits(pred_y, label_mb.to(device))
-                loss = teach_loss + cls_loss
-            scaler.scale(loss).backward()
-            scaler.step(optimizer)
-            scaler.update()
-        else:
-            pred_y = model(img_mb)
-            teach_loss = F.binary_cross_entropy_with_logits(pred_y, teacher_feas) 
-            cls_loss = F.binary_cross_entropy_with_logits(pred_y, label_mb.to(device))
-            loss = teach_loss + cls_loss
-            loss.backward()
-            optimizer.step()
+        pred_y = model(img_mb)
+        teach_loss = F.binary_cross_entropy_with_logits(pred_y, teacher_feas) 
+        cls_loss = F.binary_cross_entropy_with_logits(pred_y, label_mb.to(device))
+        loss = teach_loss + cls_loss
+        loss.backward()
+        optimizer.step()
         
         scheduler.step()
 
@@ -243,7 +230,7 @@ def valid_fn(valid_loader, model, criterion, device):
         # measure elapsed time
         batch_time.update(time.time() - end)
         end = time.time()
-        if step % 100 == 0 or step == (len(valid_loader) - 1):
+        if step % 200 == 0 or step == (len(valid_loader) - 1):
             print_str = (
                 f"EVAL: [{step}/{len(valid_loader)}] "
                 f"Data {data_time.val:.3f} ({data_time.avg:.3f}) "

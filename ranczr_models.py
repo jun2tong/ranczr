@@ -117,9 +117,12 @@ class CustomAttention(nn.Module):
 
 class EffNetWLF(nn.Module):
 
-    def __init__(self, model_name, target_size=11):
+    def __init__(self, model_name, target_size=11, pretrained=False):
         super().__init__()
-        self.backbone = EfficientNet.from_name(model_name)
+        if pretrained:
+            self.backbone = EfficientNet.from_pretrained(model_name)
+        else:
+            self.backbone = EfficientNet.from_name(model_name)
 
         self.backbone._dropout = nn.Dropout(0.1)
         n_features = self.backbone._fc.in_features
@@ -127,13 +130,7 @@ class EffNetWLF(nn.Module):
 
         # self.backbone._fc = nn.Identity()
         self.local_fe = CBAM(n_features)
-        self.dropout = nn.Dropout(0.2)
-
-        self.classifier = nn.Linear(n_features, target_size)
-
-        # self.classifier = nn.Sequential(nn.Linear(n_features+self.local_fe.inter_channels, n_features),
-        #                                 nn.ReLU(),
-        #                                 nn.Linear(n_features, target_size))
+        self.dropout = nn.Dropout(0.1)
 
     def forward(self, image):
         enc_feas = self.backbone.extract_features(image)
@@ -142,7 +139,7 @@ class EffNetWLF(nn.Module):
         global_feas = self.local_fe(enc_feas)
         global_feas = self.backbone._avg_pooling(global_feas)
         global_feas = global_feas.flatten(start_dim=1)
-        global_feas = self.dropout(global_feas)
+        global_feas = self.backbone._dropout(global_feas)
 
         # local features
         # local_feas = self.local_fe(enc_feas)
@@ -150,7 +147,7 @@ class EffNetWLF(nn.Module):
         # local_feas = self.dropout(local_feas)
 
         # all_feas = torch.cat([global_feas, local_feas], dim=1)
-        outputs = self.classifier(global_feas)
+        outputs = self.backbone._fc(global_feas)
         return outputs
 
 

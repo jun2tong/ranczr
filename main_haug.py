@@ -20,8 +20,8 @@ import albumentations as a_transform
 from albumentations.pytorch import ToTensorV2
 
 device = "cuda:0" if torch.cuda.is_available() else "cpu"
-WORKDIR = "../data/ranczr"
-# WORKDIR = "/home/jun/project/data/ranzcr-clip-catheter-line-classification"
+# WORKDIR = "../data/ranczr"
+WORKDIR = "/home/jun/project/data/ranzcr-clip-catheter-line-classification"
 torch.backends.cudnn.benchmark = True
 
 
@@ -65,21 +65,9 @@ def train_loop(folds, fold):
     # ====================================================
     # model = CustomResNext(CFG.model_name, pretrained=True, target_size=CFG.target_size)
     if "efficient" in CFG.model_name:
-        model = EffNetWLF(CFG.model_name, target_size=CFG.target_size)
-        CFG.resume_path = f"results/stage2-effb5/{CFG.model_name}-f{fold}-S2.pth"
-    elif "smp" in CFG.model_name:
-        aux_params = dict(
-            pooling="avg",  # one of 'avg', 'max'
-            dropout=None,  # dropout ratio, default is None
-            activation=None,  # activation function, default is None
-            classes=CFG.target_size,  # define number of output labels
-        )
-        weight_dir = f"results/stage2/{CFG.backbone_name}_fold{fold}_S2_best.pth"
-        if CFG.refine_model:
-            weight_dir = f"results/stage3/{CFG.backbone_name}_fold{fold}_S3_best.pth"
-        model = SMPModel(CFG.backbone_name, aux_params, weight_dir)
+        model = EffNetWLF(CFG.model_name, target_size=CFG.target_size, pretrained=not CFG.resume)
     else:
-        model = CustomAttention(CFG.model_name, target_size=CFG.target_size, pretrained=False)
+        model = CustomAttention(CFG.model_name, target_size=CFG.target_size, pretrained=not CFG.resume)
 
     if CFG.resume:
         checkpoint = torch.load(CFG.resume_path)
@@ -108,7 +96,7 @@ def train_loop(folds, fold):
     # scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=CFG.epochs*len(train_loader), 
     #                                                        eta_min=CFG.min_lr)
     scheduler = torch.optim.lr_scheduler.OneCycleLR(optimizer, max_lr=pg_lr, epochs=CFG.epochs, 
-                                                    steps_per_epoch=len(train_loader), 
+                                                    steps_per_epoch=len(train_loader)//CFG.gradient_accumulation_steps, 
                                                     final_div_factor = CFG.final_div_factor,
                                                     cycle_momentum=False)
 
@@ -123,13 +111,13 @@ def train_loop(folds, fold):
     best_loss = np.inf
     update_count = 0
     # grad_scaler = torch.cuda.amp.GradScaler()
-    grad_scaler = None
+    # grad_scaler = None
     for epoch in range(CFG.epochs):
 
         start_time = time.time()
 
         # train
-        avg_loss = train_fn(train_loader, model, criterion, optimizer, epoch, scheduler, device, grad_scaler)
+        avg_loss = train_fn(train_loader, model, criterion, optimizer, epoch, scheduler, device, CFG.gradient_accumulation_steps)
         # avg_loss = train_fn_seg(train_loader, model, criterion, optimizer, epoch, scheduler, device)
 
         # eval
@@ -205,22 +193,19 @@ if __name__ == "__main__":
         print_freq = 100
         num_workers = 4
         patience = 30
-        refine_model = False
         model_name = "swsl_resnext50_32x4d"
         backbone_name = "efficientnet-b2"
-        resume = True
+        resume = False
         resume_path = "results/stage2-grp-distill/submission/xception.pth"
         size = 512
-        scheduler = "CosineAnnealingLR"
-        epochs = 30
-        sch_step = [0.25, 0.25, 0.5]
+        epochs = 40
         # lr = 0.00003
-        lr = 0.0001
+        lr = 0.0008
         min_lr = 0.000001
         final_div_factor = 300
-        batch_size = 16
+        batch_size = 32
         weight_decay = 1e-5
-        gradient_accumulation_steps = 1
+        gradient_accumulation_steps = 2
         max_grad_norm = 1000
         seed = 5468
         target_size = 11
@@ -238,7 +223,7 @@ if __name__ == "__main__":
             "Swan Ganz Catheter Present",
         ]
         n_fold = 5
-        trn_fold = [4]
+        trn_fold = [2]
         train = True
 
     normalize = a_transform.Normalize(
@@ -253,7 +238,7 @@ if __name__ == "__main__":
             # a_transform.CLAHE(clip_limit=(1, 10), p=0.5),
             # a_transform.Rotate(limit=30),
             a_transform.RandomBrightnessContrast(p=0.2, brightness_limit=(-0.2, 0.2), contrast_limit=(-0.2, 0.2)),
-            # a_transform.HueSaturationValue(p=0.5, hue_shift_limit=10, sat_shift_limit=10, val_shift_limit=10),
+            a_transform.HueSaturationValue(p=0.5, hue_shift_limit=10, sat_shift_limit=10, val_shift_limit=10),
             a_transform.ShiftScaleRotate(p=0.5, shift_limit=0.0625, scale_limit=0.2, rotate_limit=30),
             a_transform.CoarseDropout(p=0.2),
             a_transform.Cutout(p=0.2, max_h_size=8, max_w_size=8, fill_value=(0., 0., 0.), num_holes=8),

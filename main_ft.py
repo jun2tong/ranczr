@@ -104,13 +104,13 @@ def train_loop(folds, fold):
     # ====================================================
     # scheduler
     # ====================================================
-    # scheduler = torch.optim.lr_scheduler.OneCycleLR(optimizer, max_lr=pg_lr, epochs=CFG.epochs, 
-    #                                                 steps_per_epoch=len(train_loader), 
-    #                                                 final_div_factor = CFG.final_div_factor,
-    #                                                 cycle_momentum=False)
-    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=CFG.epochs*len(train_loader), 
-                                                           eta_min=CFG.min_lr)
-    grad_scaler = torch.cuda.amp.GradScaler()
+    scheduler = torch.optim.lr_scheduler.OneCycleLR(optimizer, max_lr=pg_lr, epochs=CFG.epochs, 
+                                                    steps_per_epoch=len(train_loader), 
+                                                    final_div_factor = CFG.final_div_factor,
+                                                    cycle_momentum=False)
+    # scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=CFG.epochs*len(train_loader), 
+    #                                                        eta_min=CFG.min_lr)
+    # grad_scaler = torch.cuda.amp.GradScaler()
     # grad_scaler = None
     
     # ====================================================
@@ -127,7 +127,7 @@ def train_loop(folds, fold):
         start_time = time.time()
 
         # train
-        avg_loss = train_ft(train_loader, model, criterion, optimizer, epoch, scheduler, device, grad_scaler)
+        avg_loss = train_ft(train_loader, model, criterion, optimizer, epoch, scheduler, device, 1)
 
         # eval
         avg_val_loss, preds = valid_fn(valid_loader, model, criterion["seg"], device)
@@ -205,17 +205,17 @@ if __name__ == "__main__":
         model_name = "swsl_resnext50_32x4d"
         backbone_name = "efficientnet-b2"
         fine_tune = True
-        resume_path = "swsl_resnext50_32x4dwlf_fold0_best.pth"
+        resume_path = "swsl_resnext50_32x4d_f2_haug.pth"
         size = 512
         scheduler = "CosineAnnealingLR"
         epochs = 10
         sch_step = [0.25, 0.25, 0.5]
-        lr = 0.00005
-        # final_div_factor = 1000
+        lr = 0.0001
+        final_div_factor = 200
         min_lr = 0.000001
-        batch_size = 16
+        batch_size = 32
         weight_decay = 1e-5
-        gradient_accumulation_steps = 1
+        gradient_accumulation_steps = 2
         max_grad_norm = 1000
         seed = 5468
         target_size = 11
@@ -233,7 +233,7 @@ if __name__ == "__main__":
             "Swan Ganz Catheter Present",
         ]
         n_fold = 5
-        trn_fold = [0]
+        trn_fold = [2]
         train = True
 
     normalize = a_transform.Normalize(
