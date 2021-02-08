@@ -1,7 +1,6 @@
 import os
 import sys
 import time
-from albumentations.augmentations.transforms import CenterCrop
 import pandas as pd
 import numpy as np
 import torch
