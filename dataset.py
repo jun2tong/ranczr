@@ -54,7 +54,6 @@ class TrainDataset(Dataset):
         self.labels = torch.from_numpy(df[target_cols].values).float()
         self.transform = transform
         self.train_path = os.path.join(self.root, "train")
-        # self.needle_path = os.path.join(self.root, "needle_aug")
         self.clahe = cv2.createCLAHE(clipLimit=30.0, tileGridSize=(8, 8))
 
     def __len__(self):
@@ -70,8 +69,8 @@ class TrainDataset(Dataset):
         # image = NeedleAugmentation(image, n_needles=2, dark_needles=False, p=0.3, needle_folder=self.needle_path)
 
         if self.transform:
-            augmented = self.transform(image=image)
-            image = augmented["image"]
+            augmented_1 = self.transform(image=image)
+            image = augmented_1["image"]
 
         label = self.labels[idx]
         return image, label

@@ -167,7 +167,6 @@ def train_fn_s2(train_loader, teacher, model, optimizer, epoch, scheduler, devic
         data_time.update(time.time() - end)
 
         img_mb = img_mb.to(device)
-        # ant_img_mb = ant_img_mb.to(device)
         batch_size = img_mb.size(0)
         # features matching
         with torch.no_grad():
@@ -177,7 +176,7 @@ def train_fn_s2(train_loader, teacher, model, optimizer, epoch, scheduler, devic
         pred_y = model(img_mb)
         teach_loss = F.binary_cross_entropy_with_logits(pred_y, teacher_feas) 
         cls_loss = F.binary_cross_entropy_with_logits(pred_y, label_mb.to(device))
-        loss = teach_loss + cls_loss
+        loss = 0.7*teach_loss + 0.3*cls_loss
 
         # record loss
         losses.update(loss.item(), batch_size)

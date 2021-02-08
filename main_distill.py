@@ -1,6 +1,7 @@
 import os
 import sys
 import time
+from albumentations.augmentations.transforms import CenterCrop
 import pandas as pd
 import numpy as np
 import torch
@@ -68,12 +69,14 @@ def train_loop(folds, fold):
     # ====================================================
     # model & optimizer
     # ====================================================
-    if "efficient" in CFG.model_name:
+    if False:
         student_model = EffNetWLF(CFG.model_name, target_size=CFG.target_size, pretrained=True)
     else:    
         student_model = CustomAttention(CFG.model_name, CFG.target_size, pretrained=True)
-    weight_path = [f"pre-trained/resnet200d/resnet200d_fold{num}.pth" for num in range(5)]
+    # weight_path = [f"pre-trained/resnet200d/resnet200d_fold{num}.pth" for num in range(5)]
+    weight_path = [f"pre-trained/resnet200d_320.pth"]
     teacher_model = MyEnsemble(weight_path)
+    LOGGER.info(f"Using {len(weight_path)} model.")
 
     if torch.cuda.device_count() > 1:
         student_model = nn.DataParallel(student_model)
@@ -99,7 +102,7 @@ def train_loop(folds, fold):
                                       weight_decay=CFG.weight_decay)
 
     scheduler = torch.optim.lr_scheduler.OneCycleLR(optimizer, max_lr=pg_lr, epochs=CFG.epochs, 
-                                                    steps_per_epoch=len(train_loader), 
+                                                    steps_per_epoch=len(train_loader)//CFG.gradient_accumulation_steps, 
                                                     final_div_factor = CFG.final_div_factor,
                                                     cycle_momentum=False)
 
@@ -188,17 +191,17 @@ if __name__ == "__main__":
         debug = False
         num_workers = 4
         patience = 100
-        model_name = "efficientnet-b5"
+        model_name = "resnest101e"
         size = 512
-        epochs = 30
+        epochs = 35
         sch_step = [0.3, 0.3, 0.4]
         # lr = 0.0008
         lr = 0.0008
         final_div_factor = 300
         # min_lr = 0.000002
-        batch_size = 16
+        batch_size = 32
         weight_decay = 1e-6
-        gradient_accumulation_steps = 2
+        gradient_accumulation_steps = 1
         max_grad_norm = 1000
         seed = 5468
         target_size = 11
@@ -216,7 +219,7 @@ if __name__ == "__main__":
             "Swan Ganz Catheter Present",
         ]
         n_fold = 5
-        trn_fold = [4]
+        trn_fold = [1]
         train = True
 
     normalize = a_transform.Normalize(
@@ -228,6 +231,13 @@ if __name__ == "__main__":
         [
             a_transform.RandomResizedCrop(CFG.size, CFG.size, scale=(0.9, 1.0), p=1),
             a_transform.HorizontalFlip(p=0.5),
+            a_transform.CLAHE(clip_limit=(1, 10), p=0.5),
+            a_transform.RandomBrightnessContrast(p=0.2, brightness_limit=(-0.2, 0.2), contrast_limit=(-0.2, 0.2)),
+            a_transform.ShiftScaleRotate(p=0.5, shift_limit=0.0625, scale_limit=0.2, rotate_limit=30),
+            # a_transform.CenterCrop(448, 448, p=1),
+            # a_transform.OneOf(
+            #     [a_transform.JpegCompression(), a_transform.Downscale(scale_min=0.1, scale_max=0.15),], p=0.2,
+            # ),
             normalize,
             ToTensorV2(),
         ],

@@ -69,7 +69,7 @@ class MyEnsemble(nn.Module):
         self.model_lst = nn.ModuleList()
         for each in weight_paths:
             model = RANCZRResNet200D()
-            model.load_state_dict(torch.load(each, map_location="cpu"))
+            model.load_state_dict(torch.load(each, map_location="cpu")["model"])
             for param in model.parameters():
                 param.requires_grad = False
             self.model_lst.append(model)
