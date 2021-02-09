@@ -223,7 +223,7 @@ if __name__ == "__main__":
             "Swan Ganz Catheter Present",
         ]
         n_fold = 5
-        trn_fold = [2]
+        trn_fold = [0]
         train = True
 
     normalize = a_transform.Normalize(
@@ -239,11 +239,12 @@ if __name__ == "__main__":
             a_transform.RandomBrightnessContrast(p=0.2, brightness_limit=(-0.2, 0.2), contrast_limit=(-0.2, 0.2)),
             a_transform.HueSaturationValue(p=0.5, hue_shift_limit=10, sat_shift_limit=10, val_shift_limit=10),
             a_transform.ShiftScaleRotate(p=0.5, shift_limit=0.0625, scale_limit=0.2, rotate_limit=30),
-            a_transform.CoarseDropout(p=0.2),
-            a_transform.Cutout(p=0.2, max_h_size=8, max_w_size=8, fill_value=(0., 0., 0.), num_holes=8),
-            a_transform.OneOf(
-                [a_transform.JpegCompression(), a_transform.Downscale(scale_min=0.1, scale_max=0.15),], p=0.2,
-            ),
+            a_transform.CenterCrop(448, 448, p=1),
+            # a_transform.CoarseDropout(p=0.2),
+            # a_transform.Cutout(p=0.2, max_h_size=8, max_w_size=8, fill_value=(0., 0., 0.), num_holes=8),
+            # a_transform.OneOf(
+            #     [a_transform.JpegCompression(), a_transform.Downscale(scale_min=0.1, scale_max=0.15),], p=0.2,
+            # ),
             normalize,
             ToTensorV2(),
         ]

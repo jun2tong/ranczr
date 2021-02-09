@@ -233,10 +233,6 @@ if __name__ == "__main__":
             a_transform.CLAHE(clip_limit=(1, 10), p=0.5),
             a_transform.RandomBrightnessContrast(p=0.2, brightness_limit=(-0.2, 0.2), contrast_limit=(-0.2, 0.2)),
             a_transform.ShiftScaleRotate(p=0.5, shift_limit=0.0625, scale_limit=0.2, rotate_limit=30),
-            # a_transform.CenterCrop(448, 448, p=1),
-            # a_transform.OneOf(
-            #     [a_transform.JpegCompression(), a_transform.Downscale(scale_min=0.1, scale_max=0.15),], p=0.2,
-            # ),
             normalize,
             ToTensorV2(),
         ],
