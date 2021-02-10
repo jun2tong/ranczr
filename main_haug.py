@@ -197,11 +197,11 @@ if __name__ == "__main__":
         backbone_name = "efficientnet-b2"
         resume = True
         resume_path = "pre-trained/inception_v3.pth"
-        size = 256
+        size = 512
         epochs = 30
         # lr = 0.00003
         lr = 0.0005
-        min_lr = 0.000003
+        min_lr = 0.000002
         final_div_factor = 300
         batch_size = 64
         weight_decay = 1e-5

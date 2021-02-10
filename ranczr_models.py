@@ -133,13 +133,18 @@ class CustomModel(nn.Module):
         self.global_pool = nn.AdaptiveAvgPool2d(1)
         self.emd_fc = nn.Linear(self.num_feas, 512)
 
+        self.local_fe = CBAM(self.num_feas)
         self.head = ArcMarginHead(512, target_size)
 
     def forward(self, x):
         feas = self.backbone(x)[0]
 
-        all_feas = self.global_pool(feas)
+        # feas = self.global_pool(feas)
+        # feas = feas.flatten(start_dim=1)
+        all_feas = self.local_fe(feas)
+        all_feas = self.global_pool(all_feas)
         all_feas = all_feas.flatten(start_dim=1)
+
         embedding = self.emd_fc(all_feas)
         outputs = self.head(embedding)
         return outputs
