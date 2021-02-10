@@ -12,16 +12,16 @@ from dataset import TrainDataset, ValidDataset
 from torch.utils.data import DataLoader
 from train_fcn import train_fn, valid_fn
 from utils import get_score, init_logger
-from losses import FocalLoss
-from ranczr_models import EffNetWLF, CustomAttention
+from losses import FocalLoss, ArcFaceLossAdaptiveMargin
+from ranczr_models import EffNetWLF, CustomAttention, CustomModel
 from sklearn.model_selection import GroupKFold
 
 import albumentations as a_transform
 from albumentations.pytorch import ToTensorV2
 
 device = "cuda:0" if torch.cuda.is_available() else "cpu"
-# WORKDIR = "../data/ranczr"
-WORKDIR = "/home/jun/project/data/ranzcr-clip-catheter-line-classification"
+WORKDIR = "../data/ranczr"
+# WORKDIR = "/home/jun/project/data/ranzcr-clip-catheter-line-classification"
 torch.backends.cudnn.benchmark = True
 
 
@@ -63,27 +63,28 @@ def train_loop(folds, fold):
     # ====================================================
     # model & optimizer
     # ====================================================
-    # model = CustomResNext(CFG.model_name, pretrained=True, target_size=CFG.target_size)
-    if "efficient" in CFG.model_name:
-        model = EffNetWLF(CFG.model_name, target_size=CFG.target_size, pretrained=not CFG.resume)
-    else:
-        model = CustomAttention(CFG.model_name, target_size=CFG.target_size, pretrained=not CFG.resume)
+    model = CustomModel(CFG.model_name, target_size=CFG.target_size)
+    # if "efficient" in CFG.model_name:
+    #     model = EffNetWLF(CFG.model_name, target_size=CFG.target_size, pretrained=not CFG.resume)
+    # else:
+    #     model = CustomAttention(CFG.model_name, target_size=CFG.target_size, pretrained=not CFG.resume)
 
     if CFG.resume:
         checkpoint = torch.load(CFG.resume_path)
-        model.load_state_dict(checkpoint['model'])
-        LOGGER.info(f"Loaded correct head for {CFG.model_name}")
+        model.backbone.load_state_dict(checkpoint['model'])
+        LOGGER.info(f"Loaded correct backbone for {CFG.model_name}")
 
     if torch.cuda.device_count() > 1:
         model = nn.DataParallel(model)
     model = model.to(device)
 
-    pg_lr = [CFG.lr*0.5, CFG.lr, CFG.lr]
+    pg_lr = [CFG.lr, CFG.lr, CFG.lr]
     if torch.cuda.device_count() > 1:
-        optimizer = torch.optim.Adam([{'params': model.module.backbone.parameters(), 'lr': pg_lr[0]},
-                                      {'params': model.module.classifier.parameters(), 'lr': pg_lr[1]},
-                                      {'params': model.module.local_fe.parameters(), 'lr': pg_lr[2]}], 
-                                      weight_decay=CFG.weight_decay)
+        optimizer = torch.optim.Adam(model.module.parameters(), pg_lr[0], weight_decay=CFG.weight_decay)
+        # optimizer = torch.optim.Adam([{'params': model.module.backbone.parameters(), 'lr': pg_lr[0]},
+        #                               {'params': model.module.classifier.parameters(), 'lr': pg_lr[1]},
+        #                               {'params': model.module.local_fe.parameters(), 'lr': pg_lr[2]}], 
+        #                               weight_decay=CFG.weight_decay)
     else:
         optimizer = torch.optim.Adam([{'params': model.backbone.parameters(), 'lr': pg_lr[0]},
                                       {'params': model.classifier.parameters(), 'lr': pg_lr[1]},
@@ -93,19 +94,18 @@ def train_loop(folds, fold):
     # scheduler
     # ====================================================
 
-    # scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=CFG.epochs*len(train_loader), 
-    #                                                        eta_min=CFG.min_lr)
-    scheduler = torch.optim.lr_scheduler.OneCycleLR(optimizer, max_lr=pg_lr, epochs=CFG.epochs, 
-                                                    steps_per_epoch=len(train_loader)//CFG.gradient_accumulation_steps, 
-                                                    final_div_factor = CFG.final_div_factor,
-                                                    cycle_momentum=False)
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=CFG.epochs, eta_min=CFG.min_lr)
+    # scheduler = torch.optim.lr_scheduler.OneCycleLR(optimizer, max_lr=pg_lr, epochs=CFG.epochs, 
+    #                                                 steps_per_epoch=len(train_loader)//CFG.gradient_accumulation_steps, 
+    #                                                 final_div_factor = CFG.final_div_factor,
+    #                                                 cycle_momentum=False)
 
     # ====================================================
     # loop
     # ====================================================
     # criterion = nn.BCEWithLogitsLoss()
     # criterion = {"cls": FocalLoss(alpha=1.2, gamma=1.2, logits=True), "seg": nn.BCEWithLogitsLoss()}
-    criterion = {"cls": nn.BCEWithLogitsLoss(), "seg": nn.BCEWithLogitsLoss()}
+    criterion = {"cls": nn.BCEWithLogitsLoss(), "arc": ArcFaceLossAdaptiveMargin()}
 
     best_score = 0.0
     best_loss = np.inf
@@ -193,17 +193,17 @@ if __name__ == "__main__":
         print_freq = 100
         num_workers = 4
         patience = 30
-        model_name = "swsl_resnext50_32x4d"
+        model_name = "inception_v3"
         backbone_name = "efficientnet-b2"
-        resume = False
-        resume_path = "results/stage2-grp-distill/submission/xception.pth"
-        size = 512
-        epochs = 40
+        resume = True
+        resume_path = "pre-trained/inception_v3.pth"
+        size = 256
+        epochs = 30
         # lr = 0.00003
-        lr = 0.0008
-        min_lr = 0.000001
+        lr = 0.0005
+        min_lr = 0.000003
         final_div_factor = 300
-        batch_size = 32
+        batch_size = 64
         weight_decay = 1e-5
         gradient_accumulation_steps = 2
         max_grad_norm = 1000
@@ -239,7 +239,7 @@ if __name__ == "__main__":
             a_transform.RandomBrightnessContrast(p=0.2, brightness_limit=(-0.2, 0.2), contrast_limit=(-0.2, 0.2)),
             a_transform.HueSaturationValue(p=0.5, hue_shift_limit=10, sat_shift_limit=10, val_shift_limit=10),
             a_transform.ShiftScaleRotate(p=0.5, shift_limit=0.0625, scale_limit=0.2, rotate_limit=30),
-            a_transform.CenterCrop(448, 448, p=1),
+            # a_transform.CenterCrop(448, 448, p=1),
             # a_transform.CoarseDropout(p=0.2),
             # a_transform.Cutout(p=0.2, max_h_size=8, max_w_size=8, fill_value=(0., 0., 0.), num_holes=8),
             # a_transform.OneOf(

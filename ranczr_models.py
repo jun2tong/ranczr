@@ -10,7 +10,7 @@ from torch.cuda.amp import autocast
 from efficientnet_pytorch import EfficientNet
 from custom_mod.bit_resnet import ResNetV2, get_weights
 from custom_mod.attention import CBAM
-# import segmentation_models_pytorch as smp
+from custom_mod.metric_head import ArcMarginHead
 
 
 class CustomResNext(nn.Module):
@@ -31,18 +31,6 @@ class CustomResNext(nn.Module):
     def forward(self, x):
         x = self.model(x)
         return x
-
-
-# class SMPModel(nn.Module):
-#     def __init__(self, model_name, aux_dict, weight_dir):
-#         super().__init__()
-#         self.model = smp.Unet(model_name, classes=1, aux_params=aux_dict)
-#         self.model.load_state_dict(torch.load(weight_dir)["model"])
-
-#     def forward(self, x):
-#         enc_out = self.model.encoder(x)
-#         out = self.model.classification_head(enc_out[-1])
-#         return out
 
 
 class RANCZRResNet200D(nn.Module):
@@ -69,7 +57,7 @@ class MyEnsemble(nn.Module):
         self.model_lst = nn.ModuleList()
         for each in weight_paths:
             model = RANCZRResNet200D()
-            model.load_state_dict(torch.load(each, map_location="cpu")["model"])
+            model.load_state_dict(torch.load(each, map_location="cpu"))
             for param in model.parameters():
                 param.requires_grad = False
             self.model_lst.append(model)
@@ -139,16 +127,21 @@ class CustomModel(nn.Module):
     
     def __init__(self, model_name, target_size):
         super().__init__()
-        self.backbone = timm.create_model(model_name, pretrained=True, features_only=True, out_indices=(4,))
+        self.backbone = timm.create_model(model_name, pretrained=False, features_only=True, out_indices=(4,))
         self.num_feas = self.backbone.feature_info.channels()[-1]
 
         self.global_pool = nn.AdaptiveAvgPool2d(1)
-        self.fc = nn.Linear(self.num_feas, target_size)
+        self.emd_fc = nn.Linear(self.num_feas, 512)
+
+        self.head = ArcMarginHead(512, target_size)
 
     def forward(self, x):
         feas = self.backbone(x)[0]
 
         all_feas = self.global_pool(feas)
         all_feas = all_feas.flatten(start_dim=1)
-        outputs = self.fc(all_feas)
+        embedding = self.emd_fc(all_feas)
+        outputs = self.head(embedding)
         return outputs
+
+

@@ -72,8 +72,8 @@ def train_loop(folds, fold):
         student_model = EffNetWLF(CFG.model_name, target_size=CFG.target_size, pretrained=True)
     else:    
         student_model = CustomAttention(CFG.model_name, CFG.target_size, pretrained=True)
-    # weight_path = [f"pre-trained/resnet200d/resnet200d_fold{num}.pth" for num in range(5)]
-    weight_path = [f"pre-trained/resnet200d_320.pth"]
+    weight_path = [f"pre-trained/resnet200d/resnet200d_fold{num}.pth" for num in range(5)]
+    # weight_path = [f"pre-trained/resnet200d_320.pth"]
     teacher_model = MyEnsemble(weight_path)
     LOGGER.info(f"Using {len(weight_path)} model.")
 
