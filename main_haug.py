@@ -63,28 +63,29 @@ def train_loop(folds, fold):
     # ====================================================
     # model & optimizer
     # ====================================================
-    model = CustomModel(CFG.model_name, target_size=CFG.target_size)
-    # if "efficient" in CFG.model_name:
-    #     model = EffNetWLF(CFG.model_name, target_size=CFG.target_size, pretrained=not CFG.resume)
-    # else:
-    #     model = CustomAttention(CFG.model_name, target_size=CFG.target_size, pretrained=not CFG.resume)
+    # model = CustomModel(CFG.model_name, target_size=CFG.target_size)
+    if "efficient" in CFG.model_name:
+        model = EffNetWLF(CFG.model_name, target_size=CFG.target_size, pretrained=not CFG.resume)
+    else:
+        model = CustomAttention(CFG.model_name, target_size=CFG.target_size, pretrained=not CFG.resume)
 
     if CFG.resume:
         checkpoint = torch.load(CFG.resume_path)
         model.backbone.load_state_dict(checkpoint['model'])
         LOGGER.info(f"Loaded correct backbone for {CFG.model_name}")
+        model.modify_input()
 
     if torch.cuda.device_count() > 1:
         model = nn.DataParallel(model)
     model = model.to(device)
 
-    pg_lr = [CFG.lr, CFG.lr, CFG.lr]
+    pg_lr = [CFG.lr*0.5, CFG.lr, CFG.lr]
     if torch.cuda.device_count() > 1:
-        optimizer = torch.optim.Adam(model.module.parameters(), pg_lr[0], weight_decay=CFG.weight_decay)
-        # optimizer = torch.optim.Adam([{'params': model.module.backbone.parameters(), 'lr': pg_lr[0]},
-        #                               {'params': model.module.classifier.parameters(), 'lr': pg_lr[1]},
-        #                               {'params': model.module.local_fe.parameters(), 'lr': pg_lr[2]}], 
-        #                               weight_decay=CFG.weight_decay)
+        # optimizer = torch.optim.Adam(model.module.parameters(), pg_lr[0], weight_decay=CFG.weight_decay)
+        optimizer = torch.optim.Adam([{'params': model.module.backbone.parameters(), 'lr': pg_lr[0]},
+                                      {'params': model.module.classifier.parameters(), 'lr': pg_lr[1]},
+                                      {'params': model.module.local_fe.parameters(), 'lr': pg_lr[2]}], 
+                                      weight_decay=CFG.weight_decay)
     else:
         optimizer = torch.optim.Adam([{'params': model.backbone.parameters(), 'lr': pg_lr[0]},
                                       {'params': model.classifier.parameters(), 'lr': pg_lr[1]},
@@ -94,11 +95,11 @@ def train_loop(folds, fold):
     # scheduler
     # ====================================================
 
-    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=CFG.epochs, eta_min=CFG.min_lr)
-    # scheduler = torch.optim.lr_scheduler.OneCycleLR(optimizer, max_lr=pg_lr, epochs=CFG.epochs, 
-    #                                                 steps_per_epoch=len(train_loader)//CFG.gradient_accumulation_steps, 
-    #                                                 final_div_factor = CFG.final_div_factor,
-    #                                                 cycle_momentum=False)
+    # scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=CFG.epochs, eta_min=CFG.min_lr)
+    scheduler = torch.optim.lr_scheduler.OneCycleLR(optimizer, max_lr=pg_lr[0], epochs=CFG.epochs, 
+                                                    steps_per_epoch=len(train_loader)//CFG.gradient_accumulation_steps, 
+                                                    final_div_factor = CFG.final_div_factor,
+                                                    cycle_momentum=False)
 
     # ====================================================
     # loop
@@ -197,15 +198,15 @@ if __name__ == "__main__":
         backbone_name = "efficientnet-b2"
         resume = True
         resume_path = "pre-trained/inception_v3.pth"
-        size = 512
+        size = 640
         epochs = 30
         # lr = 0.00003
-        lr = 0.0005
-        min_lr = 0.000002
-        final_div_factor = 300
+        lr = 3e-5
+        min_lr = 2e-5
+        final_div_factor = 20
         batch_size = 64
         weight_decay = 1e-5
-        gradient_accumulation_steps = 2
+        gradient_accumulation_steps = 1
         max_grad_norm = 1000
         seed = 5468
         target_size = 11
@@ -229,15 +230,15 @@ if __name__ == "__main__":
     normalize = a_transform.Normalize(
         mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225], p=1.0, max_pixel_value=255.0,
     )
-
+    # normalize = a_transform.Normalize(mean=[0.485], std=[0.229], p=1.0, max_pixel_value=255.0)
     augmentation = [
             a_transform.RandomResizedCrop(CFG.size, CFG.size, scale=(0.9, 1.0), p=1),
             a_transform.HorizontalFlip(p=0.5),
             # a_transform.OneOf([a_transform.GaussNoise(var_limit=[10, 50]), a_transform.GaussianBlur()], p=0.5),
-            a_transform.CLAHE(clip_limit=(1, 10), p=0.5),
+            # a_transform.CLAHE(clip_limit=(1, 10), p=0.5),
             # a_transform.Rotate(limit=30),
             a_transform.RandomBrightnessContrast(p=0.2, brightness_limit=(-0.2, 0.2), contrast_limit=(-0.2, 0.2)),
-            a_transform.HueSaturationValue(p=0.5, hue_shift_limit=10, sat_shift_limit=10, val_shift_limit=10),
+            # a_transform.HueSaturationValue(p=0.5, hue_shift_limit=10, sat_shift_limit=10, val_shift_limit=10),
             a_transform.ShiftScaleRotate(p=0.5, shift_limit=0.0625, scale_limit=0.2, rotate_limit=30),
             # a_transform.CenterCrop(448, 448, p=1),
             # a_transform.CoarseDropout(p=0.2),

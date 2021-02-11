@@ -82,6 +82,9 @@ class CustomAttention(nn.Module):
         self.global_pool = nn.AdaptiveAvgPool2d(1)
         self.classifier = nn.Linear(self.num_feas, target_size)
 
+    def modify_input(self):
+        self.backbone.Conv2d_1a_3x3.conv.weight.data = torch.mean(self.backbone.Conv2d_1a_3x3.conv.weight, dim=1).unsqueeze(1)
+
     def forward(self, x):
         feas = self.backbone(x)[0]
 

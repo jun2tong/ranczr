@@ -229,6 +229,7 @@ def main_worker(gpu, ngpus_per_node, args):
     my_glob = glob(f'{args.data}/images*/images/*.png')
     print(f'Number of Observations: {len(my_glob)}')
 
+    # TODO: Parse the labels here
     full_img_paths = {os.path.basename(x): x for x in my_glob}
     df['full_path'] = df['Image Index'].map(full_img_paths.get)
     traindir = df['full_path'].values

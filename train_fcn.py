@@ -24,11 +24,11 @@ def train_fn(train_loader, model, criterion, optimizer, epoch, scheduler, device
         labels = labels.to(device)
         batch_size = labels.size(0)
 
-        # img, targets_a, targets_b, lam = mixup_data(img, labels, 1.0, device)
+        img, targets_a, targets_b, lam = mixup_data(img, labels, 1.0, device)
 
         y_preds = model(img)
-        loss = criterion["arc"](y_preds, labels)
-        # loss = mixup_criterion(criterion["cls"], y_preds, targets_a, targets_b, lam)
+        # loss = criterion["cls"](y_preds, labels)
+        loss = mixup_criterion(criterion["cls"], y_preds, targets_a, targets_b, lam)
 
         # record loss
         losses.update(loss.item(), batch_size)
@@ -40,7 +40,7 @@ def train_fn(train_loader, model, criterion, optimizer, epoch, scheduler, device
         if (step+1) % gradient_acc_step == 0:
             optimizer.step()
             optimizer.zero_grad()
-            # scheduler.step()
+            scheduler.step()
 
         # measure elapsed time
         batch_time.update(time.time() - end)
@@ -55,7 +55,7 @@ def train_fn(train_loader, model, criterion, optimizer, epoch, scheduler, device
                 f"lr: {scheduler.get_last_lr()[0]:.7f}"
             )
             print(print_str)
-    scheduler.step()
+    # scheduler.step()
     return losses.avg
 
 
