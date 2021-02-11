@@ -68,7 +68,7 @@ def train_loop(folds, fold):
     # ====================================================
     # model & optimizer
     # ====================================================
-    if False:
+    if "efficient" in CFG.model_name:
         student_model = EffNetWLF(CFG.model_name, target_size=CFG.target_size, pretrained=True)
     else:    
         student_model = CustomAttention(CFG.model_name, CFG.target_size, pretrained=True)
@@ -190,16 +190,16 @@ if __name__ == "__main__":
         debug = False
         num_workers = 4
         patience = 100
-        model_name = "resnest101e"
+        model_name = "efficientnet-b5"
         size = 512
         epochs = 35
         sch_step = [0.3, 0.3, 0.4]
         # lr = 0.0008
         lr = 0.0008
-        final_div_factor = 300
+        final_div_factor = 200
         # min_lr = 0.000002
         batch_size = 32
-        weight_decay = 1e-6
+        weight_decay = 1e-5
         gradient_accumulation_steps = 1
         max_grad_norm = 1000
         seed = 5468
@@ -218,7 +218,7 @@ if __name__ == "__main__":
             "Swan Ganz Catheter Present",
         ]
         n_fold = 5
-        trn_fold = [1]
+        trn_fold = [0]
         train = True
 
     normalize = a_transform.Normalize(
