@@ -2,9 +2,68 @@ import numpy as np
 import time
 import torch
 import torch.nn.functional as F
-from torch.cuda.amp import autocast
-import pdb
 from utils import AverageMeter, timeSince
+import pdb
+
+
+def train_auc(train_loader, model, expt_a, expt_b, alpha, criterion, optimizer, aux_opt, epoch, scheduler, device, gradient_acc_step=1):
+
+    batch_time = AverageMeter()
+    data_time = AverageMeter()
+    losses = AverageMeter()
+    # switch to train mode
+    model.train()
+    start = end = time.time()
+    # gradient_acc_step = 2
+    optimizer.zero_grad()
+    aux_opt.zero_grad()
+    for step, (x_mb, labels) in enumerate(train_loader):
+        # measure data loading time
+        data_time.update(time.time() - end)
+        img = x_mb.to(device)
+        labels = labels.to(device)
+        batch_size = labels.size(0)
+
+        # img, targets_a, targets_b, lam = mixup_data(img, labels, 1.0, device)
+
+        y_preds = model(img)
+        loss = criterion(y_preds, labels, expt_a, expt_b, alpha)
+        # loss = mixup_criterion(criterion["cls"], y_preds, targets_a, targets_b, lam)
+
+        # record loss
+        losses.update(loss.item(), batch_size)
+
+        if gradient_acc_step > 1:
+            loss = loss / gradient_acc_step
+
+        loss.backward()
+        if (step+1) % gradient_acc_step == 0:
+            optimizer.step()
+            aux_opt.step()
+            # HACK to update alpha
+            if alpha.grad is not None:
+                alpha.data = torch.relu(alpha.data + 0.00002*alpha.grad.data)
+                alpha.grad.data *= 0
+                # alpha.retain_grad()      
+            optimizer.zero_grad()
+            aux_opt.zero_grad()
+            scheduler.step()
+
+        # measure elapsed time
+        batch_time.update(time.time() - end)
+        end = time.time()
+        # if step % CFG.print_freq == 0 or step == (len(train_loader)-1):
+        if step % 200 == 0 or step == (len(train_loader) - 1):
+            print_str = (
+                f"Epoch: [{epoch+1}][{step}/{len(train_loader)}] "
+                f"Data {data_time.val:.3f} ({data_time.avg:.3f}) "
+                f"Elapsed {timeSince(start, float(step+1)/len(train_loader)):s} "
+                f"Loss: {losses.val:.4f}({losses.avg:.4f}) "
+                f"lr: {scheduler.get_last_lr()[0]:.7f}"
+            )
+            print(print_str)
+    # scheduler.step()
+    return losses.avg
 
 
 def train_fn(train_loader, model, criterion, optimizer, epoch, scheduler, device, gradient_acc_step=1):

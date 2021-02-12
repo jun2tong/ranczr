@@ -198,9 +198,9 @@ if __name__ == "__main__":
         lr = 0.0008
         final_div_factor = 200
         # min_lr = 0.000002
-        batch_size = 32
+        batch_size = 16
         weight_decay = 1e-5
-        gradient_accumulation_steps = 1
+        gradient_accumulation_steps = 2
         max_grad_norm = 1000
         seed = 5468
         target_size = 11

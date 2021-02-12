@@ -10,9 +10,9 @@ import sys
 from optimizer import Ranger
 from dataset import TrainDataset, ValidDataset
 from torch.utils.data import DataLoader
-from train_fcn import train_fn, valid_fn
+from train_fcn import train_fn, valid_fn, train_auc
 from utils import get_score, init_logger
-from losses import FocalLoss, ArcFaceLossAdaptiveMargin
+from losses import FocalLoss, DeepAUC
 from ranczr_models import EffNetWLF, CustomAttention, CustomModel
 from sklearn.model_selection import GroupKFold
 
@@ -73,15 +73,19 @@ def train_loop(folds, fold):
         checkpoint = torch.load(CFG.resume_path)
         model.backbone.load_state_dict(checkpoint['model'])
         LOGGER.info(f"Loaded correct backbone for {CFG.model_name}")
-        model.modify_input()
 
     if torch.cuda.device_count() > 1:
         model = nn.DataParallel(model)
     model = model.to(device)
 
+    # Define expt_a, expt_b and alpha
+    expt_a = torch.zeros(CFG.target_size, dtype=torch.float32, device=device, requires_grad=True)
+    expt_b = torch.zeros(CFG.target_size, dtype=torch.float32, device=device, requires_grad=True)
+    alpha = torch.zeros(CFG.target_size, dtype=torch.float32, device=device)+0.5
+    alpha.requires_grad = True
+
     pg_lr = [CFG.lr*0.5, CFG.lr, CFG.lr]
     if torch.cuda.device_count() > 1:
-        # optimizer = torch.optim.Adam(model.module.parameters(), pg_lr[0], weight_decay=CFG.weight_decay)
         optimizer = torch.optim.Adam([{'params': model.module.backbone.parameters(), 'lr': pg_lr[0]},
                                       {'params': model.module.classifier.parameters(), 'lr': pg_lr[1]},
                                       {'params': model.module.local_fe.parameters(), 'lr': pg_lr[2]}], 
@@ -91,12 +95,13 @@ def train_loop(folds, fold):
                                       {'params': model.classifier.parameters(), 'lr': pg_lr[1]},
                                       {'params': model.local_fe.parameters(), 'lr': pg_lr[2]}], 
                                       weight_decay=CFG.weight_decay)
+    aux_opt = torch.optim.Adam([expt_a, expt_b], lr=0.00002, weight_decay=1e-5, betas=(0.5, 0.999))
     # ====================================================
     # scheduler
     # ====================================================
 
     # scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=CFG.epochs, eta_min=CFG.min_lr)
-    scheduler = torch.optim.lr_scheduler.OneCycleLR(optimizer, max_lr=pg_lr[0], epochs=CFG.epochs, 
+    scheduler = torch.optim.lr_scheduler.OneCycleLR(optimizer, max_lr=pg_lr, epochs=CFG.epochs, 
                                                     steps_per_epoch=len(train_loader)//CFG.gradient_accumulation_steps, 
                                                     final_div_factor = CFG.final_div_factor,
                                                     cycle_momentum=False)
@@ -106,7 +111,9 @@ def train_loop(folds, fold):
     # ====================================================
     # criterion = nn.BCEWithLogitsLoss()
     # criterion = {"cls": FocalLoss(alpha=1.2, gamma=1.2, logits=True), "seg": nn.BCEWithLogitsLoss()}
-    criterion = {"cls": nn.BCEWithLogitsLoss(), "arc": ArcFaceLossAdaptiveMargin()}
+    phat = torch.sum(train_dataset.labels, dim=0) / train_dataset.labels.shape[0]
+    LOGGER.info(f"phat: {np.round(phat.numpy(), decimals=4)}")
+    criterion = {"cls": nn.BCEWithLogitsLoss(), "auc": DeepAUC(phat.to(device))}
 
     best_score = 0.0
     best_loss = np.inf
@@ -118,7 +125,10 @@ def train_loop(folds, fold):
         start_time = time.time()
 
         # train
-        avg_loss = train_fn(train_loader, model, criterion, optimizer, epoch, scheduler, device, CFG.gradient_accumulation_steps)
+        avg_loss = train_auc(train_loader, model, expt_a, expt_b, alpha, 
+                             criterion["auc"], optimizer, aux_opt, 
+                             epoch, scheduler, device, CFG.gradient_accumulation_steps)
+        # avg_loss = train_fn(train_loader, model, criterion, optimizer, epoch, scheduler, device, CFG.gradient_accumulation_steps)
         # avg_loss = train_fn_seg(train_loader, model, criterion, optimizer, epoch, scheduler, device)
 
         # eval
@@ -131,16 +141,19 @@ def train_loop(folds, fold):
         elapsed = time.time() - start_time
 
         LOGGER.info(f"Epoch {epoch+1} - scheduler lr: {scheduler.get_last_lr()}  time: {elapsed:.0f}s")
+        LOGGER.info(f"expt_a: {np.round(expt_a.data.cpu().numpy(), decimals=4)}")
+        LOGGER.info(f"expt_b: {np.round(expt_b.data.cpu().numpy(), decimals=4)}")
+        LOGGER.info(f"alpha: {np.round(alpha.data.cpu().numpy(), decimals=4)}")
         LOGGER.info(f"Epoch {epoch+1} - avg_train_loss: {avg_loss:.4f}  avg_val_loss: {avg_val_loss:.4f}")
         LOGGER.info(f"Epoch {epoch+1} - Score: {score:.4f}  Scores: {np.round(scores, decimals=4)}")
 
-        if avg_val_loss < best_loss:
+        if score > best_score:
             update_count = 0
             if avg_val_loss < best_loss:
                 best_loss = avg_val_loss
             if score > best_score:
                 best_score = score
-            LOGGER.info(f"Epoch {epoch+1} - Save Best Loss: {best_loss:.4f} Model")
+            LOGGER.info(f"Epoch {epoch+1} - Save Best Loss: {best_loss:.4f} Best Score: {best_score:.4f} Model")
             if torch.cuda.device_count() > 1:
                 torch.save({"model": model.module.state_dict(), "preds": preds}, f"{CFG.model_name}_f{fold}_haug.pth")
             else:
@@ -194,19 +207,19 @@ if __name__ == "__main__":
         print_freq = 100
         num_workers = 4
         patience = 30
-        model_name = "inception_v3"
+        model_name = "resnet200d"
         backbone_name = "efficientnet-b2"
         resume = True
-        resume_path = "pre-trained/inception_v3.pth"
-        size = 640
-        epochs = 30
+        resume_path = "pre-trained/resnet200d.pth"
+        size = 512
+        epochs = 40
         # lr = 0.00003
-        lr = 3e-5
-        min_lr = 2e-5
-        final_div_factor = 20
-        batch_size = 64
+        lr = 0.00005
+        min_lr = 0.000003
+        final_div_factor = 50
+        batch_size = 16
         weight_decay = 1e-5
-        gradient_accumulation_steps = 1
+        gradient_accumulation_steps = 4
         max_grad_norm = 1000
         seed = 5468
         target_size = 11

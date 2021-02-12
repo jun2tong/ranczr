@@ -3,6 +3,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import pdb
 
 
 class FocalLoss(nn.Module):
@@ -40,13 +41,6 @@ class ArcFaceLossAdaptiveMargin(nn.Module):
         self.mm = math.sin(math.pi - margins) * margins
             
     def forward(self, logits, labels):
-        # ms = []
-        # ms = self.margins[labels.cpu().numpy()]
-        # cos_m = torch.from_numpy(np.cos(ms)).float().cuda()
-        # sin_m = torch.from_numpy(np.sin(ms)).float().cuda()
-        # th = torch.from_numpy(np.cos(math.pi - ms)).float().cuda()
-        # mm = torch.from_numpy(np.sin(math.pi - ms) * ms).float().cuda()
-        # labels = F.one_hot(labels, out_dim).float()
 
         logits = logits.float()
         cosine = logits
@@ -57,4 +51,24 @@ class ArcFaceLossAdaptiveMargin(nn.Module):
         output = (labels * phi) + ((1.0 - labels) * cosine)
         output *= self.s
         loss = F.binary_cross_entropy_with_logits(output, labels)
+        return loss
+
+
+class DeepAUC(nn.Module):
+    def __init__(self, phat):
+        super(DeepAUC, self).__init__()
+        self.phat = phat
+        self.margin = 0.5
+
+    def forward(self, mod_out, labels, expt_a, expt_b, alpha):
+
+        logits = torch.sigmoid(mod_out)
+        neg_ind = torch.relu(-1*(labels-1))
+
+        A1 = torch.mean((1-self.phat)*torch.pow(logits - expt_a, 2)*labels.float(), dim=0)
+        A2 = torch.mean(self.phat*torch.pow(logits - expt_b, 2)*neg_ind.float(), dim=0)
+        cross_term = self.phat*(1-self.phat)*(alpha**2)
+        margin_term = torch.mean(2*alpha*(self.phat*(1-self.phat)*self.margin + self.phat*logits*neg_ind.float() - (1-self.phat)*logits*labels.float()), dim=0)
+        # margin_term = 2*(1+alpha)*torch.mean((self.phat*logits*neg_ind.float() - (1-self.phat)*logits*labels.float()))
+        loss = torch.sum(A1 + A2 + margin_term - cross_term)
         return loss
