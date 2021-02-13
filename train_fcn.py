@@ -11,10 +11,11 @@ def train_auc(train_loader, model, expt_a, expt_b, alpha, criterion, optimizer, 
     batch_time = AverageMeter()
     data_time = AverageMeter()
     losses = AverageMeter()
+    cls_losses = AverageMeter()
+    auc_losses = AverageMeter()
     # switch to train mode
     model.train()
     start = end = time.time()
-    # gradient_acc_step = 2
     optimizer.zero_grad()
     aux_opt.zero_grad()
     for step, (x_mb, labels) in enumerate(train_loader):
@@ -34,6 +35,8 @@ def train_auc(train_loader, model, expt_a, expt_b, alpha, criterion, optimizer, 
 
         # record loss
         losses.update(loss.item(), batch_size)
+        cls_losses.update(cls_loss.item(), batch_size)
+        auc_losses.update(auc_loss.item(), batch_size)
 
         if gradient_acc_step > 1:
             loss = loss / gradient_acc_step
@@ -45,12 +48,10 @@ def train_auc(train_loader, model, expt_a, expt_b, alpha, criterion, optimizer, 
             # HACK to update alpha
             if alpha.grad is not None:
                 alpha.data = torch.relu(alpha.data + 0.00002*alpha.grad.data)
-                # alpha.data = alpha.data + 0.0002*alpha.grad.data
-                alpha.grad.data *= 0
-                # alpha.retain_grad()      
+                alpha.grad.data *= 0 
             optimizer.zero_grad()
             aux_opt.zero_grad()
-            scheduler.step()
+            # scheduler.step()
 
         # measure elapsed time
         batch_time.update(time.time() - end)
@@ -62,11 +63,56 @@ def train_auc(train_loader, model, expt_a, expt_b, alpha, criterion, optimizer, 
                 f"Data {data_time.val:.3f} ({data_time.avg:.3f}) "
                 f"Elapsed {timeSince(start, float(step+1)/len(train_loader)):s} "
                 f"Loss: {losses.val:.4f}({losses.avg:.4f}) "
+                f"Breakdown: [{cls_losses.avg:.4f}][{auc_losses.avg:.4f}]"
                 # f"lr: {scheduler.get_last_lr()[0]:.7f}"
             )
             print(print_str)
-    # scheduler.step()
+    scheduler.step()
     return losses.avg
+
+
+def valid_auc(valid_loader, model, expt_a, expt_b, alpha, criterion, device):
+    batch_time = AverageMeter()
+    data_time = AverageMeter()
+    losses = AverageMeter()
+    cls_losses = AverageMeter()
+    auc_losses = AverageMeter()
+    # switch to evaluation mode
+    model.eval()
+    preds = []
+    start = end = time.time()
+    for step, (x_mb, labels) in enumerate(valid_loader):
+        # measure data loading time
+        data_time.update(time.time() - end)
+        img = x_mb.to(device)
+        labels = labels.to(device)
+        batch_size = labels.size(0)
+        # compute loss
+        with torch.no_grad():
+            y_preds = model(img)
+            cls_loss = criterion['cls'](y_preds, labels)
+            auc_loss = criterion['auc'](y_preds, labels, expt_a, expt_b, alpha)
+            loss = cls_loss + auc_loss
+        losses.update(loss.cpu().numpy(), batch_size)
+        cls_losses.update(cls_loss.cpu().numpy(), batch_size)
+        auc_losses.update(auc_loss.cpu().numpy(), batch_size)
+        # record accuracy
+        preds.append(y_preds.sigmoid().to("cpu").numpy())
+
+        # measure elapsed time
+        batch_time.update(time.time() - end)
+        end = time.time()
+        if step % 200 == 0 or step == (len(valid_loader) - 1):
+            print_str = (
+                f"EVAL: [{step}/{len(valid_loader)}] "
+                f"Data {data_time.val:.3f} ({data_time.avg:.3f}) "
+                f"Elapsed {timeSince(start, float(step+1)/len(valid_loader)):s} "
+                f"Loss: {losses.val:.4f}({losses.avg:.4f}) "
+            )
+            print(print_str)
+
+    predictions = np.concatenate(preds)
+    return losses.avg, cls_losses.avg, auc_losses.avg, predictions
 
 
 def train_fn(train_loader, model, criterion, optimizer, epoch, scheduler, device, gradient_acc_step=1):

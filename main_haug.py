@@ -10,7 +10,7 @@ import sys
 from optimizer import Ranger
 from dataset import TrainDataset, ValidDataset
 from torch.utils.data import DataLoader
-from train_fcn import train_fn, valid_fn, train_auc
+from train_fcn import train_fn, valid_fn, train_auc, valid_auc
 from utils import get_score, init_logger
 from losses import FocalLoss, DeepAUC
 from ranczr_models import EffNetWLF, CustomAttention, CustomModel
@@ -20,8 +20,8 @@ import albumentations as a_transform
 from albumentations.pytorch import ToTensorV2
 
 device = "cuda:0" if torch.cuda.is_available() else "cpu"
-# WORKDIR = "../data/ranczr"
-WORKDIR = "/home/jun/project/data/ranzcr-clip-catheter-line-classification"
+WORKDIR = "../data/ranczr"
+# WORKDIR = "/home/jun/project/data/ranzcr-clip-catheter-line-classification"
 torch.backends.cudnn.benchmark = True
 
 
@@ -101,11 +101,11 @@ def train_loop(folds, fold):
     # ====================================================
 
     # scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='max', patience=3, min_lr=CFG.min_lr)
-    # scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=CFG.epochs, eta_min=CFG.min_lr)
-    scheduler = torch.optim.lr_scheduler.OneCycleLR(optimizer, max_lr=pg_lr, epochs=CFG.epochs, 
-                                                    steps_per_epoch=len(train_loader)//CFG.gradient_accumulation_steps, 
-                                                    final_div_factor = CFG.final_div_factor,
-                                                    cycle_momentum=False)
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=CFG.epochs, eta_min=CFG.min_lr)
+    # scheduler = torch.optim.lr_scheduler.OneCycleLR(optimizer, max_lr=pg_lr, epochs=CFG.epochs, 
+    #                                                 steps_per_epoch=len(train_loader)//CFG.gradient_accumulation_steps, 
+    #                                                 final_div_factor = CFG.final_div_factor,
+    #                                                 cycle_momentum=False)
 
     # ====================================================
     # loop
@@ -133,8 +133,8 @@ def train_loop(folds, fold):
         # avg_loss = train_fn_seg(train_loader, model, criterion, optimizer, epoch, scheduler, device)
 
         # eval
-        avg_val_loss, preds = valid_fn(valid_loader, model, criterion["cls"], device)
-        # avg_val_loss, preds = valid_fn_seg(valid_loader, model, criterion, device)
+        # avg_val_loss, preds = valid_fn(valid_loader, model, criterion["cls"], device)
+        avg_val_loss, avg_cls_loss, avg_auc_loss, preds = valid_auc(valid_loader, model, expt_a, expt_b, alpha, criterion, device)
 
         # scoring
         score, scores = get_score(valid_labels, preds)
@@ -147,6 +147,7 @@ def train_loop(folds, fold):
         LOGGER.info(f"expt_b: {np.round(expt_b.data.cpu().numpy(), decimals=4)}")
         LOGGER.info(f"alpha: {np.round(alpha.data.cpu().numpy(), decimals=4)}")
         LOGGER.info(f"Epoch {epoch+1} - avg_train_loss: {avg_loss:.4f}  avg_val_loss: {avg_val_loss:.4f} time: {elapsed:.0f}s")
+        LOGGER.info(f"Breakdown: [{avg_cls_loss:.4f}][{avg_auc_loss:.4f}]")
         LOGGER.info(f"Epoch {epoch+1} - Score: {score:.4f}  Scores: {np.round(scores, decimals=4)}")
 
         if score > best_score:
@@ -214,12 +215,12 @@ if __name__ == "__main__":
         resume = True
         resume_path = "pre-trained/resnet200d.pth"
         size = 640
-        epochs = 30
+        epochs = 15
         # lr = 0.00003
         lr = 0.00005
-        min_lr = 0.000002
+        min_lr = 0.000001
         final_div_factor = 50
-        batch_size = 32
+        batch_size = 16
         weight_decay = 1e-5
         gradient_accumulation_steps = 1
         max_grad_norm = 1000
@@ -239,7 +240,7 @@ if __name__ == "__main__":
             "Swan Ganz Catheter Present",
         ]
         n_fold = 5
-        trn_fold = [4]
+        trn_fold = [0]
         train = True
 
     normalize = a_transform.Normalize(
@@ -256,8 +257,8 @@ if __name__ == "__main__":
             # a_transform.HueSaturationValue(p=0.5, hue_shift_limit=10, sat_shift_limit=10, val_shift_limit=10),
             a_transform.ShiftScaleRotate(p=0.5, shift_limit=0.0625, scale_limit=0.2, rotate_limit=30),
             # a_transform.CenterCrop(448, 448, p=1),
-            # a_transform.CoarseDropout(p=0.2),
-            # a_transform.Cutout(p=0.2, max_h_size=8, max_w_size=8, fill_value=(0., 0., 0.), num_holes=8),
+            a_transform.CoarseDropout(p=0.2),
+            a_transform.Cutout(p=0.2, max_h_size=8, max_w_size=8, fill_value=(0., 0., 0.), num_holes=8),
             # a_transform.OneOf(
             #     [a_transform.JpegCompression(), a_transform.Downscale(scale_min=0.1, scale_max=0.15),], p=0.2,
             # ),
