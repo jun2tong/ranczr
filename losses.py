@@ -69,7 +69,7 @@ class DeepAUC(nn.Module):
         A1 = torch.mean((1-phat)*torch.pow(logits - expt_a, 2)*labels.float(), dim=0)
         A2 = torch.mean(phat*torch.pow(logits - expt_b, 2)*neg_ind.float(), dim=0)
         cross_term = phat*(1-phat)*torch.pow(alpha,2)
-        margin_term_1 = 2*(1+alpha)*(phat*(1-phat)*self.margin + torch.mean(phat*logits*neg_ind.float() - (1-phat)*logits*labels.float(), dim=0))
+        margin_term_1 = 2*(alpha)*(phat*(1-phat)*self.margin + torch.mean(phat*logits*neg_ind.float() - (1-phat)*logits*labels.float(), dim=0))
         # margin_term_2 = 2*(1+alpha)*torch.mean((phat*logits*neg_ind.float() - (1-phat)*logits*labels.float()), dim=0)
-        loss = torch.sum(A1 + A2 + margin_term_1 - cross_term)
+        loss = torch.mean(A1 + A2 + margin_term_1 - cross_term)
         return loss

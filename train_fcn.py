@@ -27,7 +27,9 @@ def train_auc(train_loader, model, expt_a, expt_b, alpha, criterion, optimizer, 
         # img, targets_a, targets_b, lam = mixup_data(img, labels, 1.0, device)
 
         y_preds = model(img)
-        loss = criterion(y_preds, labels, expt_a, expt_b, alpha)
+        cls_loss = criterion['cls'](y_preds, labels)
+        auc_loss = criterion['auc'](y_preds, labels, expt_a, expt_b, alpha)
+        loss = auc_loss + cls_loss
         # loss = mixup_criterion(criterion["cls"], y_preds, targets_a, targets_b, lam)
 
         # record loss
@@ -42,13 +44,13 @@ def train_auc(train_loader, model, expt_a, expt_b, alpha, criterion, optimizer, 
             aux_opt.step()
             # HACK to update alpha
             if alpha.grad is not None:
-                alpha.data = torch.relu(alpha.data + 0.0002*alpha.grad.data)
+                alpha.data = torch.relu(alpha.data + 0.00002*alpha.grad.data)
                 # alpha.data = alpha.data + 0.0002*alpha.grad.data
                 alpha.grad.data *= 0
                 # alpha.retain_grad()      
             optimizer.zero_grad()
             aux_opt.zero_grad()
-            # scheduler.step()
+            scheduler.step()
 
         # measure elapsed time
         batch_time.update(time.time() - end)

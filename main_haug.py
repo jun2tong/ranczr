@@ -20,8 +20,8 @@ import albumentations as a_transform
 from albumentations.pytorch import ToTensorV2
 
 device = "cuda:0" if torch.cuda.is_available() else "cpu"
-WORKDIR = "../data/ranczr"
-# WORKDIR = "/home/jun/project/data/ranzcr-clip-catheter-line-classification"
+# WORKDIR = "../data/ranczr"
+WORKDIR = "/home/jun/project/data/ranzcr-clip-catheter-line-classification"
 torch.backends.cudnn.benchmark = True
 
 
@@ -95,17 +95,17 @@ def train_loop(folds, fold):
                                       {'params': model.classifier.parameters(), 'lr': pg_lr[1]},
                                       {'params': model.local_fe.parameters(), 'lr': pg_lr[2]}], 
                                       weight_decay=CFG.weight_decay)
-    aux_opt = torch.optim.Adam([expt_a, expt_b], lr=0.0002, weight_decay=1e-5, betas=(0.5, 0.999))
+    aux_opt = torch.optim.Adam([expt_a, expt_b], lr=0.00002, weight_decay=1e-5, betas=(0.5, 0.999))
     # ====================================================
     # scheduler
     # ====================================================
 
-    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='max', patience=3, min_lr=CFG.min_lr)
+    # scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='max', patience=3, min_lr=CFG.min_lr)
     # scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=CFG.epochs, eta_min=CFG.min_lr)
-    # scheduler = torch.optim.lr_scheduler.OneCycleLR(optimizer, max_lr=pg_lr, epochs=CFG.epochs, 
-    #                                                 steps_per_epoch=len(train_loader)//CFG.gradient_accumulation_steps, 
-    #                                                 final_div_factor = CFG.final_div_factor,
-    #                                                 cycle_momentum=False)
+    scheduler = torch.optim.lr_scheduler.OneCycleLR(optimizer, max_lr=pg_lr, epochs=CFG.epochs, 
+                                                    steps_per_epoch=len(train_loader)//CFG.gradient_accumulation_steps, 
+                                                    final_div_factor = CFG.final_div_factor,
+                                                    cycle_momentum=False)
 
     # ====================================================
     # loop
@@ -127,7 +127,7 @@ def train_loop(folds, fold):
 
         # train
         avg_loss = train_auc(train_loader, model, expt_a, expt_b, alpha, 
-                             criterion["auc"], optimizer, aux_opt, 
+                             criterion, optimizer, aux_opt, 
                              epoch, scheduler, device, CFG.gradient_accumulation_steps)
         # avg_loss = train_fn(train_loader, model, criterion, optimizer, epoch, scheduler, device, CFG.gradient_accumulation_steps)
         # avg_loss = train_fn_seg(train_loader, model, criterion, optimizer, epoch, scheduler, device)
@@ -139,14 +139,14 @@ def train_loop(folds, fold):
         # scoring
         score, scores = get_score(valid_labels, preds)
 
-        scheduler.step(score)
+        # scheduler.step(score)
         elapsed = time.time() - start_time
 
         # LOGGER.info(f"Epoch {epoch+1} - scheduler lr: {scheduler.get_last_lr()}  time: {elapsed:.0f}s")
         LOGGER.info(f"expt_a: {np.round(expt_a.data.cpu().numpy(), decimals=4)}")
         LOGGER.info(f"expt_b: {np.round(expt_b.data.cpu().numpy(), decimals=4)}")
         LOGGER.info(f"alpha: {np.round(alpha.data.cpu().numpy(), decimals=4)}")
-        LOGGER.info(f"Epoch {epoch+1} - avg_train_loss: {avg_loss:.4f}  avg_val_loss: {avg_val_loss:.4f}")
+        LOGGER.info(f"Epoch {epoch+1} - avg_train_loss: {avg_loss:.4f}  avg_val_loss: {avg_val_loss:.4f} time: {elapsed:.0f}s")
         LOGGER.info(f"Epoch {epoch+1} - Score: {score:.4f}  Scores: {np.round(scores, decimals=4)}")
 
         if score > best_score:
@@ -209,19 +209,19 @@ if __name__ == "__main__":
         print_freq = 100
         num_workers = 4
         patience = 30
-        model_name = "resnest101e"
+        model_name = "resnet200d"
         backbone_name = "efficientnet-b2"
-        resume = False
-        resume_path = "pre-trained/inception_v3.pth"
-        size = 512
+        resume = True
+        resume_path = "pre-trained/resnet200d.pth"
+        size = 640
         epochs = 30
         # lr = 0.00003
-        lr = 0.0001
+        lr = 0.00005
         min_lr = 0.000002
-        final_div_factor = 30
+        final_div_factor = 50
         batch_size = 32
         weight_decay = 1e-5
-        gradient_accumulation_steps = 2
+        gradient_accumulation_steps = 1
         max_grad_norm = 1000
         seed = 5468
         target_size = 11
@@ -239,7 +239,7 @@ if __name__ == "__main__":
             "Swan Ganz Catheter Present",
         ]
         n_fold = 5
-        trn_fold = [0]
+        trn_fold = [4]
         train = True
 
     normalize = a_transform.Normalize(
