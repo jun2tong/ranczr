@@ -81,7 +81,7 @@ def train_loop(folds, fold):
     # Define expt_a, expt_b and alpha
     expt_a = torch.zeros(CFG.target_size, dtype=torch.float32, device=device, requires_grad=True)
     expt_b = torch.zeros(CFG.target_size, dtype=torch.float32, device=device, requires_grad=True)
-    alpha = torch.zeros(CFG.target_size, dtype=torch.float32, device=device)+0.5
+    alpha = torch.zeros(CFG.target_size, dtype=torch.float32, device=device)+0.1
     alpha.requires_grad = True
 
     pg_lr = [CFG.lr*0.5, CFG.lr, CFG.lr]
@@ -95,16 +95,17 @@ def train_loop(folds, fold):
                                       {'params': model.classifier.parameters(), 'lr': pg_lr[1]},
                                       {'params': model.local_fe.parameters(), 'lr': pg_lr[2]}], 
                                       weight_decay=CFG.weight_decay)
-    aux_opt = torch.optim.Adam([expt_a, expt_b], lr=0.00002, weight_decay=1e-5, betas=(0.5, 0.999))
+    aux_opt = torch.optim.Adam([expt_a, expt_b], lr=0.0002, weight_decay=1e-5, betas=(0.5, 0.999))
     # ====================================================
     # scheduler
     # ====================================================
 
+    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='max', patience=3, min_lr=CFG.min_lr)
     # scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=CFG.epochs, eta_min=CFG.min_lr)
-    scheduler = torch.optim.lr_scheduler.OneCycleLR(optimizer, max_lr=pg_lr, epochs=CFG.epochs, 
-                                                    steps_per_epoch=len(train_loader)//CFG.gradient_accumulation_steps, 
-                                                    final_div_factor = CFG.final_div_factor,
-                                                    cycle_momentum=False)
+    # scheduler = torch.optim.lr_scheduler.OneCycleLR(optimizer, max_lr=pg_lr, epochs=CFG.epochs, 
+    #                                                 steps_per_epoch=len(train_loader)//CFG.gradient_accumulation_steps, 
+    #                                                 final_div_factor = CFG.final_div_factor,
+    #                                                 cycle_momentum=False)
 
     # ====================================================
     # loop
@@ -138,9 +139,10 @@ def train_loop(folds, fold):
         # scoring
         score, scores = get_score(valid_labels, preds)
 
+        scheduler.step(score)
         elapsed = time.time() - start_time
 
-        LOGGER.info(f"Epoch {epoch+1} - scheduler lr: {scheduler.get_last_lr()}  time: {elapsed:.0f}s")
+        # LOGGER.info(f"Epoch {epoch+1} - scheduler lr: {scheduler.get_last_lr()}  time: {elapsed:.0f}s")
         LOGGER.info(f"expt_a: {np.round(expt_a.data.cpu().numpy(), decimals=4)}")
         LOGGER.info(f"expt_b: {np.round(expt_b.data.cpu().numpy(), decimals=4)}")
         LOGGER.info(f"alpha: {np.round(alpha.data.cpu().numpy(), decimals=4)}")
@@ -207,19 +209,19 @@ if __name__ == "__main__":
         print_freq = 100
         num_workers = 4
         patience = 30
-        model_name = "resnet200d"
+        model_name = "resnest101e"
         backbone_name = "efficientnet-b2"
-        resume = True
-        resume_path = "pre-trained/resnet200d.pth"
+        resume = False
+        resume_path = "pre-trained/inception_v3.pth"
         size = 512
-        epochs = 40
+        epochs = 30
         # lr = 0.00003
-        lr = 0.00005
-        min_lr = 0.000003
-        final_div_factor = 50
-        batch_size = 16
+        lr = 0.0001
+        min_lr = 0.000002
+        final_div_factor = 30
+        batch_size = 32
         weight_decay = 1e-5
-        gradient_accumulation_steps = 4
+        gradient_accumulation_steps = 2
         max_grad_norm = 1000
         seed = 5468
         target_size = 11
@@ -248,7 +250,7 @@ if __name__ == "__main__":
             a_transform.RandomResizedCrop(CFG.size, CFG.size, scale=(0.9, 1.0), p=1),
             a_transform.HorizontalFlip(p=0.5),
             # a_transform.OneOf([a_transform.GaussNoise(var_limit=[10, 50]), a_transform.GaussianBlur()], p=0.5),
-            # a_transform.CLAHE(clip_limit=(1, 10), p=0.5),
+            a_transform.CLAHE(clip_limit=(1, 10), p=0.5),
             # a_transform.Rotate(limit=30),
             a_transform.RandomBrightnessContrast(p=0.2, brightness_limit=(-0.2, 0.2), contrast_limit=(-0.2, 0.2)),
             # a_transform.HueSaturationValue(p=0.5, hue_shift_limit=10, sat_shift_limit=10, val_shift_limit=10),

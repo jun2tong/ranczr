@@ -42,12 +42,13 @@ def train_auc(train_loader, model, expt_a, expt_b, alpha, criterion, optimizer, 
             aux_opt.step()
             # HACK to update alpha
             if alpha.grad is not None:
-                alpha.data = torch.relu(alpha.data + 0.00002*alpha.grad.data)
+                alpha.data = torch.relu(alpha.data + 0.0002*alpha.grad.data)
+                # alpha.data = alpha.data + 0.0002*alpha.grad.data
                 alpha.grad.data *= 0
                 # alpha.retain_grad()      
             optimizer.zero_grad()
             aux_opt.zero_grad()
-            scheduler.step()
+            # scheduler.step()
 
         # measure elapsed time
         batch_time.update(time.time() - end)
@@ -59,7 +60,7 @@ def train_auc(train_loader, model, expt_a, expt_b, alpha, criterion, optimizer, 
                 f"Data {data_time.val:.3f} ({data_time.avg:.3f}) "
                 f"Elapsed {timeSince(start, float(step+1)/len(train_loader)):s} "
                 f"Loss: {losses.val:.4f}({losses.avg:.4f}) "
-                f"lr: {scheduler.get_last_lr()[0]:.7f}"
+                # f"lr: {scheduler.get_last_lr()[0]:.7f}"
             )
             print(print_str)
     # scheduler.step()

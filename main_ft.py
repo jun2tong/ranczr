@@ -10,18 +10,18 @@ import sys
 from optimizer import Ranger
 from dataset import TrainDataset, ValidDataset
 from torch.utils.data import DataLoader
-from train_fcn import train_ft, valid_fn
+from train_fcn import train_fn, valid_fn, train_auc
 from utils import get_score, init_logger
-from losses import FocalLoss
-from ranczr_models import EffNetWLF, CustomAttention
+from losses import FocalLoss, DeepAUC
+from ranczr_models import EffNetWLF, CustomAttention, CustomModel
 from sklearn.model_selection import GroupKFold
 
 import albumentations as a_transform
 from albumentations.pytorch import ToTensorV2
 
-device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-# WORKDIR = "../data/ranczr"
-WORKDIR = "/home/jun/project/data/ranzcr-clip-catheter-line-classification"
+device = "cuda:0" if torch.cuda.is_available() else "cpu"
+WORKDIR = "../data/ranczr"
+# WORKDIR = "/home/jun/project/data/ranzcr-clip-catheter-line-classification"
 torch.backends.cudnn.benchmark = True
 
 
@@ -38,18 +38,8 @@ def train_loop(folds, fold):
     train_folds = folds.loc[trn_idx].reset_index(drop=True)
     valid_folds = folds.loc[val_idx].reset_index(drop=True)
 
-    # train_folds = train_folds[train_folds['StudyInstanceUID'].isin(train_annot['StudyInstanceUID'].unique())].reset_index(drop=True)
-    # valid_folds = valid_folds[valid_folds['StudyInstanceUID'].isin(train_annot['StudyInstanceUID'].unique())].reset_index(drop=True)
-
     valid_labels = valid_folds[CFG.target_cols].values
-    # train_dataset = AnnotDataset(WORKDIR, train_folds, train_annot,
-    #                            flip_transform=train_transform,
-    #                            target_cols=CFG.target_cols)
-    # valid_dataset = AnnotDataset(WORKDIR, valid_folds, train_annot,
-    #                            flip_transform=valid_transform,
-    #                            target_cols=CFG.target_cols)
-    # train_dataset = SegDataset(WORKDIR, train_folds, flip_transform=train_transform, target_cols=CFG.target_cols)
-    # valid_dataset = SegDataset(WORKDIR, valid_folds, flip_transform=valid_transform, target_cols=CFG.target_cols)
+
     train_dataset = TrainDataset(WORKDIR, train_folds, transform=train_transform, target_cols=CFG.target_cols)
     valid_dataset = ValidDataset(WORKDIR, valid_folds, transform=valid_transform, target_cols=CFG.target_cols)
 
@@ -73,95 +63,112 @@ def train_loop(folds, fold):
     # ====================================================
     # model & optimizer
     # ====================================================
-    # resume_path = f"results/stage2-effb5/{CFG.model_name}_fold{fold}_S2_best.pth"
-    if "efficientnet" in CFG.model_name:
-        model = EffNetWLF(CFG.model_name, CFG.target_size)
+    # model = CustomModel(CFG.model_name, target_size=CFG.target_size)
+    if "efficient" in CFG.model_name:
+        model = EffNetWLF(CFG.model_name, target_size=CFG.target_size, pretrained=not CFG.resume)
     else:
-        model = CustomAttention(CFG.model_name, CFG.target_size)
+        model = CustomAttention(CFG.model_name, target_size=CFG.target_size, pretrained=not CFG.resume)
 
-    if CFG.fine_tune:
+    if CFG.resume:
         checkpoint = torch.load(CFG.resume_path)
-        model.load_state_dict(checkpoint["model"])
-        LOGGER.info(f"fine tuning wo augment {CFG.model_name}")
+        model.load_state_dict(checkpoint['model'])
+        LOGGER.info(f"Loaded correct BCE trained model for {CFG.model_name}")
+        nn.init.kaiming_normal_(model.classifier.weight)
+
+    # for param in model.backbone.parameters():
+    #     param.requires_grad = False
 
     if torch.cuda.device_count() > 1:
         model = nn.DataParallel(model)
-    model.to(device)
+    model = model.to(device)
+
+    # Define expt_a, expt_b and alpha
+    expt_a = torch.zeros(CFG.target_size, dtype=torch.float32, device=device, requires_grad=True)
+    expt_b = torch.zeros(CFG.target_size, dtype=torch.float32, device=device, requires_grad=True)
+    alpha = torch.zeros(CFG.target_size, dtype=torch.float32, device=device)+0.1
+    alpha.requires_grad = True
 
     pg_lr = [CFG.lr*0.5, CFG.lr, CFG.lr]
     if torch.cuda.device_count() > 1:
         optimizer = torch.optim.Adam([{'params': model.module.backbone.parameters(), 'lr': pg_lr[0]},
-                                    {'params': model.module.classifier.parameters(), 'lr': pg_lr[1]},
-                                    {'params': model.module.local_fe.parameters(), 'lr': pg_lr[2]}], 
-                                    weight_decay=CFG.weight_decay)
+                                      {'params': model.module.local_fe.parameters(), 'lr': pg_lr[1]},
+                                      {'params': model.module.classifier.parameters(), 'lr': pg_lr[2]}], 
+                                      weight_decay=CFG.weight_decay)
     else:
-        optimizer = torch.optim.Adam([{'params': model.backbone.parameters(), 'lr': pg_lr[0]},
-                                    {'params': model.classifier.parameters(), 'lr': pg_lr[1]},
-                                    {'params': model.local_fe.parameters(), 'lr': pg_lr[2]}], 
-                                    weight_decay=CFG.weight_decay)
-    # optimizer = Ranger([{'params': model.backbone.parameters(), 'lr': pg_lr[0]},
-    #                     {'params': model.classifier.parameters(), 'lr': pg_lr[1]},
-    #                     {'params': model.local_fe.parameters(), 'lr': pg_lr[2]}], 
-    #                     weight_decay=CFG.weight_decay)                                  
+        optimizer = torch.optim.Adam([{'params': model.classifier.parameters(), 'lr': pg_lr[1]}], 
+                                      weight_decay=CFG.weight_decay)
+    aux_opt = torch.optim.Adam([expt_a, expt_b], lr=0.0002, weight_decay=1e-5, betas=(0.5, 0.999))
     # ====================================================
     # scheduler
     # ====================================================
-    scheduler = torch.optim.lr_scheduler.OneCycleLR(optimizer, max_lr=pg_lr, epochs=CFG.epochs, 
-                                                    steps_per_epoch=len(train_loader), 
-                                                    final_div_factor = CFG.final_div_factor,
-                                                    cycle_momentum=False)
-    # scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=CFG.epochs*len(train_loader), 
-    #                                                        eta_min=CFG.min_lr)
-    # grad_scaler = torch.cuda.amp.GradScaler()
-    # grad_scaler = None
-    
+
+    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, factor=0.5, mode='max', patience=2, min_lr=CFG.min_lr)
+    # scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=CFG.epochs, eta_min=CFG.min_lr)
+    # scheduler = torch.optim.lr_scheduler.OneCycleLR(optimizer, max_lr=pg_lr, epochs=CFG.epochs, 
+    #                                                 steps_per_epoch=len(train_loader)//CFG.gradient_accumulation_steps, 
+    #                                                 final_div_factor = CFG.final_div_factor,
+    #                                                 cycle_momentum=False)
+
     # ====================================================
     # loop
     # ====================================================
-    # criterion = {"cls": FocalLoss(alpha=1.5, logits=True), "seg": nn.BCEWithLogitsLoss()}
-    criterion = {"cls": nn.BCEWithLogitsLoss(), "seg": nn.BCEWithLogitsLoss()}
+    # criterion = nn.BCEWithLogitsLoss()
+    # criterion = {"cls": FocalLoss(alpha=1.2, gamma=1.2, logits=True), "seg": nn.BCEWithLogitsLoss()}
+    phat = torch.sum(train_dataset.labels, dim=0) / train_dataset.labels.shape[0]
+    LOGGER.info(f"phat: {np.round(phat.numpy(), decimals=4)}")
+    criterion = {"cls": nn.BCEWithLogitsLoss(), "auc": DeepAUC(phat.to(device))}
 
     best_score = 0.0
     best_loss = np.inf
     update_count = 0
+    # grad_scaler = torch.cuda.amp.GradScaler()
+    # grad_scaler = None
     for epoch in range(CFG.epochs):
 
         start_time = time.time()
 
         # train
-        avg_loss = train_ft(train_loader, model, criterion, optimizer, epoch, scheduler, device, 1)
+        avg_loss = train_auc(train_loader, model, expt_a, expt_b, alpha, 
+                             criterion["auc"], optimizer, aux_opt, 
+                             epoch, scheduler, device, CFG.gradient_accumulation_steps)
+        # avg_loss = train_fn(train_loader, model, criterion, optimizer, epoch, scheduler, device, CFG.gradient_accumulation_steps)
+        # avg_loss = train_fn_seg(train_loader, model, criterion, optimizer, epoch, scheduler, device)
 
         # eval
-        avg_val_loss, preds = valid_fn(valid_loader, model, criterion["seg"], device)
+        avg_val_loss, preds = valid_fn(valid_loader, model, criterion["cls"], device)
+        # avg_val_loss, preds = valid_fn_seg(valid_loader, model, criterion, device)
 
         # scoring
         score, scores = get_score(valid_labels, preds)
 
+        scheduler.step(score)
         elapsed = time.time() - start_time
 
-        LOGGER.info(f"Epoch {epoch+1} - avg_train_loss: {avg_loss:.4f}  avg_val_loss: {avg_val_loss:.4f}  time: {elapsed:.0f}s")
-        LOGGER.info(f"Epoch {epoch+1} - Score: {score:.4f}  Scores: {np.round(scores, decimals=4)}")
+        # LOGGER.info(f"Epoch {epoch+1} - scheduler lr: {scheduler.get_last_lr()}  time: {elapsed:.0f}s")
+        LOGGER.info(f"expt_a: {np.round(expt_a.data.cpu().numpy(), decimals=4)}")
+        LOGGER.info(f"expt_b: {np.round(expt_b.data.cpu().numpy(), decimals=4)}")
+        LOGGER.info(f"alpha: {np.round(alpha.data.cpu().numpy(), decimals=4)}")
+        LOGGER.info(f"Epoch {epoch+1} - avg_train_loss: {avg_loss:.4f}  avg_val_loss: {avg_val_loss:.4f}")
+        LOGGER.info(f"Epoch {epoch+1} - Score: {score:.4f}  Scores: {np.round(scores, decimals=4)} time: {elapsed:.0f}s")
 
-        if avg_val_loss < best_loss:
+        if score > best_score:
             update_count = 0
             if avg_val_loss < best_loss:
                 best_loss = avg_val_loss
             if score > best_score:
                 best_score = score
-            LOGGER.info(f"Epoch {epoch+1} - Save Best Loss: {best_loss:.4f} Best Score {best_score:.4f} Model")
+            LOGGER.info(f"Epoch {epoch+1} - Save Best Loss: {best_loss:.4f} Best Score: {best_score:.4f} Model")
             if torch.cuda.device_count() > 1:
-                torch.save({"model": model.module.state_dict(), "preds": preds},
-                            f"{CFG.model_name}-ft-fold{fold}-best.pth")
+                torch.save({"model": model.module.state_dict(), "preds": preds}, f"{CFG.model_name}_f{fold}_ft.pth")
             else:
-                torch.save({"model": model.state_dict(), "preds": preds},
-                            f"{CFG.model_name}-ft-fold{fold}-best.pth")
+                torch.save({"model": model.state_dict(), "preds": preds}, f"{CFG.model_name}_f{fold}_ft.pth")
         else:
             update_count += 1
             if update_count >= CFG.patience:
                 LOGGER.info(f"Early Stopped at Epoch {epoch+1}")
                 break
 
-    check_point = torch.load(f"{CFG.model_name}-ft-fold{fold}-best.pth")
+    check_point = torch.load(f"{CFG.model_name}_f{fold}_ft.pth")
     for c in [f"pred_{c}" for c in CFG.target_cols]:
         valid_folds[c] = np.nan
     valid_folds[[f"pred_{c}" for c in CFG.target_cols]] = check_point["preds"]
@@ -206,18 +213,17 @@ if __name__ == "__main__":
         patience = 30
         model_name = "swsl_resnext50_32x4d"
         backbone_name = "efficientnet-b2"
-        fine_tune = True
-        resume_path = "swsl_resnext50_32x4d_f2_haug.pth"
+        resume = True
+        resume_path = "results/stage2-grp-distill/swsl_resnext50_32x4d_fold1_S2_best.pth"
         size = 512
-        scheduler = "CosineAnnealingLR"
-        epochs = 10
-        sch_step = [0.25, 0.25, 0.5]
-        lr = 0.0001
-        final_div_factor = 200
-        min_lr = 0.000001
+        epochs = 20
+        # lr = 0.00003
+        lr = 0.00005
+        min_lr = 0.000002
+        final_div_factor = 30
         batch_size = 32
         weight_decay = 1e-5
-        gradient_accumulation_steps = 2
+        gradient_accumulation_steps = 1
         max_grad_norm = 1000
         seed = 5468
         target_size = 11
@@ -235,29 +241,38 @@ if __name__ == "__main__":
             "Swan Ganz Catheter Present",
         ]
         n_fold = 5
-        trn_fold = [2]
+        trn_fold = [1]
         train = True
 
     normalize = a_transform.Normalize(
-        mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225], p=1.0, max_pixel_value=255.0
+        mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225], p=1.0, max_pixel_value=255.0,
     )
     # normalize = a_transform.Normalize(mean=[0.485], std=[0.229], p=1.0, max_pixel_value=255.0)
-
-    train_transform = a_transform.Compose(
-        [
+    augmentation = [
             a_transform.RandomResizedCrop(CFG.size, CFG.size, scale=(0.9, 1.0), p=1),
             a_transform.HorizontalFlip(p=0.5),
+            # a_transform.OneOf([a_transform.GaussNoise(var_limit=[10, 50]), a_transform.GaussianBlur()], p=0.5),
+            a_transform.CLAHE(clip_limit=(1, 10), p=0.5),
+            # a_transform.Rotate(limit=30),
+            # a_transform.RandomBrightnessContrast(p=0.2, brightness_limit=(-0.2, 0.2), contrast_limit=(-0.2, 0.2)),
+            # a_transform.HueSaturationValue(p=0.5, hue_shift_limit=10, sat_shift_limit=10, val_shift_limit=10),
+            a_transform.ShiftScaleRotate(p=0.5, shift_limit=0.0625, scale_limit=0.2, rotate_limit=30),
+            # a_transform.CenterCrop(448, 448, p=1),
+            a_transform.CoarseDropout(p=0.2),
+            # a_transform.Cutout(p=0.2, max_h_size=8, max_w_size=8, fill_value=(0., 0., 0.), num_holes=8),
+            # a_transform.OneOf(
+            #     [a_transform.JpegCompression(), a_transform.Downscale(scale_min=0.1, scale_max=0.15),], p=0.2,
+            # ),
             normalize,
             ToTensorV2(),
-        ],
-        p=1.0,
-    )
+        ]
+    train_transform = a_transform.Compose(augmentation, p=1.0)
 
     valid_transform = a_transform.Compose([a_transform.Resize(CFG.size, CFG.size), normalize, ToTensorV2()], p=1.0)
 
     if not os.path.exists("./"):
         os.makedirs("./")
-    LOGGER = init_logger(f"{CFG.model_name}-fold{CFG.trn_fold[0]}_ft.log")
+    LOGGER = init_logger(f"{CFG.model_name}-f{CFG.trn_fold[0]}.log")
 
     train_csv = pd.read_csv(os.path.join(WORKDIR, "train.csv"))
     weird_uid = "1.2.826.0.1.3680043.8.498.93345761486297843389996628528592497280"
