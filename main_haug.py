@@ -1,6 +1,7 @@
 import pdb
 import os
 import time
+from albumentations.augmentations.transforms import SmallestMaxSize
 import pandas as pd
 import numpy as np
 import torch
@@ -101,11 +102,11 @@ def train_loop(folds, fold):
     # ====================================================
 
     # scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='max', patience=3, min_lr=CFG.min_lr)
-    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=CFG.epochs, eta_min=CFG.min_lr)
-    # scheduler = torch.optim.lr_scheduler.OneCycleLR(optimizer, max_lr=pg_lr, epochs=CFG.epochs, 
-    #                                                 steps_per_epoch=len(train_loader)//CFG.gradient_accumulation_steps, 
-    #                                                 final_div_factor = CFG.final_div_factor,
-    #                                                 cycle_momentum=False)
+    # scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=CFG.epochs, eta_min=CFG.min_lr)
+    scheduler = torch.optim.lr_scheduler.OneCycleLR(optimizer, max_lr=pg_lr, epochs=CFG.epochs, 
+                                                    steps_per_epoch=len(train_loader)//CFG.gradient_accumulation_steps, 
+                                                    final_div_factor = CFG.final_div_factor,
+                                                    cycle_momentum=False)
 
     # ====================================================
     # loop
@@ -143,8 +144,8 @@ def train_loop(folds, fold):
         elapsed = time.time() - start_time
 
         # LOGGER.info(f"Epoch {epoch+1} - scheduler lr: {scheduler.get_last_lr()}  time: {elapsed:.0f}s")
-        LOGGER.info(f"expt_a: {np.round(expt_a.data.cpu().numpy(), decimals=4)}")
-        LOGGER.info(f"expt_b: {np.round(expt_b.data.cpu().numpy(), decimals=4)}")
+        # LOGGER.info(f"expt_a: {np.round(expt_a.data.cpu().numpy(), decimals=4)}")
+        # LOGGER.info(f"expt_b: {np.round(expt_b.data.cpu().numpy(), decimals=4)}")
         LOGGER.info(f"alpha: {np.round(alpha.data.cpu().numpy(), decimals=4)}")
         LOGGER.info(f"Epoch {epoch+1} - avg_train_loss: {avg_loss:.4f}  avg_val_loss: {avg_val_loss:.4f} time: {elapsed:.0f}s")
         LOGGER.info(f"Breakdown: [{avg_cls_loss:.4f}][{avg_auc_loss:.4f}]")
@@ -215,14 +216,14 @@ if __name__ == "__main__":
         resume = True
         resume_path = "pre-trained/resnet200d.pth"
         size = 640
-        epochs = 15
-        # lr = 0.00003
-        lr = 0.00005
+        epochs = 25
+        lr = 0.00003
+        # lr = 0.0001
         min_lr = 0.000001
         final_div_factor = 50
         batch_size = 16
         weight_decay = 1e-5
-        gradient_accumulation_steps = 1
+        gradient_accumulation_steps = 2
         max_grad_norm = 1000
         seed = 5468
         target_size = 11
@@ -240,7 +241,7 @@ if __name__ == "__main__":
             "Swan Ganz Catheter Present",
         ]
         n_fold = 5
-        trn_fold = [0]
+        trn_fold = [2]
         train = True
 
     normalize = a_transform.Normalize(
@@ -249,16 +250,20 @@ if __name__ == "__main__":
     # normalize = a_transform.Normalize(mean=[0.485], std=[0.229], p=1.0, max_pixel_value=255.0)
     augmentation = [
             a_transform.RandomResizedCrop(CFG.size, CFG.size, scale=(0.9, 1.0), p=1),
+            # a_transform.SmallestMaxSize(CFG.size),
+            # a_transform.RandomCrop(CFG.size, CFG.size),
+            # a_transform.LongestMaxSize(max_size=CFG.size),
+            # a_transform.PadIfNeeded(CFG.size, CFG.size),
             a_transform.HorizontalFlip(p=0.5),
             # a_transform.OneOf([a_transform.GaussNoise(var_limit=[10, 50]), a_transform.GaussianBlur()], p=0.5),
             a_transform.CLAHE(clip_limit=(1, 10), p=0.5),
             # a_transform.Rotate(limit=30),
-            a_transform.RandomBrightnessContrast(p=0.2, brightness_limit=(-0.2, 0.2), contrast_limit=(-0.2, 0.2)),
+            a_transform.RandomBrightnessContrast(p=0.5, brightness_limit=(-0.2, 0.2), contrast_limit=(-0.2, 0.2)),
             # a_transform.HueSaturationValue(p=0.5, hue_shift_limit=10, sat_shift_limit=10, val_shift_limit=10),
             a_transform.ShiftScaleRotate(p=0.5, shift_limit=0.0625, scale_limit=0.2, rotate_limit=30),
             # a_transform.CenterCrop(448, 448, p=1),
-            a_transform.CoarseDropout(p=0.2),
-            a_transform.Cutout(p=0.2, max_h_size=8, max_w_size=8, fill_value=(0., 0., 0.), num_holes=8),
+            # a_transform.CoarseDropout(p=0.2),
+            # a_transform.Cutout(p=0.2, max_h_size=8, max_w_size=8, fill_value=(0., 0., 0.), num_holes=8),
             # a_transform.OneOf(
             #     [a_transform.JpegCompression(), a_transform.Downscale(scale_min=0.1, scale_max=0.15),], p=0.2,
             # ),
