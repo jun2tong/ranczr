@@ -241,7 +241,7 @@ if __name__ == "__main__":
             "Swan Ganz Catheter Present",
         ]
         n_fold = 5
-        trn_fold = [2]
+        trn_fold = [1]
         train = True
 
     normalize = a_transform.Normalize(
