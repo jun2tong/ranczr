@@ -1,12 +1,10 @@
 import pdb
 import os
 import time
-from albumentations.augmentations.transforms import SmallestMaxSize
 import pandas as pd
 import numpy as np
 import torch
 import torch.nn as nn
-import sys
 
 from optimizer import Ranger
 from dataset import TrainDataset, ValidDataset
@@ -14,7 +12,7 @@ from torch.utils.data import DataLoader
 from train_fcn import train_fn, valid_fn, train_auc, valid_auc
 from utils import get_score, init_logger
 from losses import FocalLoss, DeepAUC
-from ranczr_models import EffNetWLF, CustomAttention, CustomModel
+from ranczr_models import CustomAttention, EffNetWLF
 from sklearn.model_selection import GroupKFold
 
 import albumentations as a_transform
@@ -67,6 +65,7 @@ def train_loop(folds, fold):
     # model = CustomModel(CFG.model_name, target_size=CFG.target_size)
     if "efficient" in CFG.model_name:
         model = EffNetWLF(CFG.model_name, target_size=CFG.target_size, pretrained=not CFG.resume)
+        # model = CustomAttention(CFG.model_name, target_size=CFG.target_size, pretrained=not CFG.resume)
     else:
         model = CustomAttention(CFG.model_name, target_size=CFG.target_size, pretrained=not CFG.resume)
 
@@ -83,7 +82,7 @@ def train_loop(folds, fold):
     expt_a = torch.zeros(CFG.target_size, dtype=torch.float32, device=device, requires_grad=True)
     expt_b = torch.zeros(CFG.target_size, dtype=torch.float32, device=device, requires_grad=True)
     alpha = torch.zeros(CFG.target_size, dtype=torch.float32, device=device)+0.1
-    alpha.requires_grad = True
+    # alpha.requires_grad = True
 
     pg_lr = [CFG.lr*0.5, CFG.lr, CFG.lr]
     if torch.cuda.device_count() > 1:
@@ -146,29 +145,30 @@ def train_loop(folds, fold):
         # LOGGER.info(f"Epoch {epoch+1} - scheduler lr: {scheduler.get_last_lr()}  time: {elapsed:.0f}s")
         # LOGGER.info(f"expt_a: {np.round(expt_a.data.cpu().numpy(), decimals=4)}")
         # LOGGER.info(f"expt_b: {np.round(expt_b.data.cpu().numpy(), decimals=4)}")
-        LOGGER.info(f"alpha: {np.round(alpha.data.cpu().numpy(), decimals=4)}")
+        # LOGGER.info(f"alpha: {np.round(alpha.data.cpu().numpy(), decimals=2)}")
         LOGGER.info(f"Epoch {epoch+1} - avg_train_loss: {avg_loss:.4f}  avg_val_loss: {avg_val_loss:.4f} time: {elapsed:.0f}s")
         LOGGER.info(f"Breakdown: [{avg_cls_loss:.4f}][{avg_auc_loss:.4f}]")
-        LOGGER.info(f"Epoch {epoch+1} - Score: {score:.4f}  Scores: {np.round(scores, decimals=4)}")
-
+        LOGGER.info(f"Epoch {epoch+1} - Score: {score:.4f}")
+        # LOGGER.info(f"Epoch {epoch+1} - Scores: {np.round(scores, decimals=4)}")
+        save_bs = False
+        save_bl = False
         if score > best_score:
-            update_count = 0
-            if avg_val_loss < best_loss:
-                best_loss = avg_val_loss
-            if score > best_score:
-                best_score = score
-            LOGGER.info(f"Epoch {epoch+1} - Save Best Loss: {best_loss:.4f} Best Score: {best_score:.4f} Model")
-            if torch.cuda.device_count() > 1:
-                torch.save({"model": model.module.state_dict(), "preds": preds}, f"{CFG.model_name}_f{fold}_haug.pth")
-            else:
-                torch.save({"model": model.state_dict(), "preds": preds}, f"{CFG.model_name}_f{fold}_haug.pth")
-        else:
-            update_count += 1
-            if update_count >= CFG.patience:
-                LOGGER.info(f"Early Stopped at Epoch {epoch+1}")
-                break
+            best_score = score
+            save_bs = True
+        if avg_cls_loss < best_loss:
+            best_loss = avg_cls_loss
+            save_bl = True
 
-    check_point = torch.load(f"{CFG.model_name}_f{fold}_haug.pth")
+        if save_bs or save_bl:
+            LOGGER.info(f"Epoch {epoch+1} - Save Best Loss: {best_loss:.4f} Best Score: {best_score:.4f} Model")
+            save_name = "val" if save_bl else "score"
+            if torch.cuda.device_count() > 1:
+                torch.save({"model": model.module.state_dict(), "preds": preds}, f"{CFG.model_name}_f{fold}_{save_name}.pth")
+            else:
+                torch.save({"model": model.state_dict(), "preds": preds}, f"{CFG.model_name}_f{fold}_{save_name}.pth")
+        LOGGER.info(f"========== epoch {epoch+1} end ==========")
+
+    check_point = torch.load(f"{CFG.model_name}_f{fold}_{save_name}.pth")
     for c in [f"pred_{c}" for c in CFG.target_cols]:
         valid_folds[c] = np.nan
     valid_folds[[f"pred_{c}" for c in CFG.target_cols]] = check_point["preds"]
@@ -176,7 +176,7 @@ def train_loop(folds, fold):
     return valid_folds
 
 
-def main(folds):
+def main(folds, fold):
 
     """
     Prepare: 1.train  2.folds
@@ -190,18 +190,22 @@ def main(folds):
 
     if CFG.train:
         # train
-        oof_df = pd.DataFrame()
-        for fold in range(CFG.n_fold):
-            if fold in CFG.trn_fold:
-                _oof_df = train_loop(folds, fold)
-                oof_df = pd.concat([oof_df, _oof_df])
-                LOGGER.info(f"========== fold: {fold} result ==========")
-                get_result(_oof_df)
+        _oof_df = train_loop(folds, fold)
+        LOGGER.info(f"========== fold: {fold} result ==========")
+        get_result(_oof_df)
+
+        # oof_df = pd.DataFrame()
+        # for fold in range(CFG.n_fold):
+        #     if fold in CFG.trn_fold:
+        #         _oof_df = train_loop(folds, fold)
+        #         oof_df = pd.concat([oof_df, _oof_df])
+        #         LOGGER.info(f"========== fold: {fold} result ==========")
+        #         get_result(_oof_df)
         # CV result
-        LOGGER.info(f"========== CV ==========")
-        get_result(oof_df)
+        # LOGGER.info(f"========== CV ==========")
+        # get_result(oof_df)
         # save result
-        oof_df.to_csv("./oof_df.csv", index=False)
+        # oof_df.to_csv("./oof_df.csv", index=False)
 
 
 if __name__ == "__main__":
@@ -211,19 +215,20 @@ if __name__ == "__main__":
         print_freq = 100
         num_workers = 4
         patience = 30
-        model_name = "resnet200d"
+        model_name = "efficientnet_b5"
         backbone_name = "efficientnet-b2"
         resume = True
-        resume_path = "pre-trained/resnet200d.pth"
-        size = 640
-        epochs = 25
-        lr = 0.00003
-        # lr = 0.0001
+        resume_path = "pre-trained/efficientnet_b5.pth"
+        size = 456
+        # epochs = 25
+        # lr = 0.00003
+        epochs = 30
+        lr = 0.00004
         min_lr = 0.000001
         final_div_factor = 50
-        batch_size = 16
+        batch_size = 32
         weight_decay = 1e-5
-        gradient_accumulation_steps = 2
+        gradient_accumulation_steps = 1
         max_grad_norm = 1000
         seed = 5468
         target_size = 11
@@ -241,7 +246,7 @@ if __name__ == "__main__":
             "Swan Ganz Catheter Present",
         ]
         n_fold = 5
-        trn_fold = [1]
+        trn_fold = [3]
         train = True
 
     normalize = a_transform.Normalize(
@@ -276,14 +281,13 @@ if __name__ == "__main__":
 
     if not os.path.exists("./"):
         os.makedirs("./")
-    LOGGER = init_logger(f"{CFG.model_name}-f{CFG.trn_fold[0]}.log")
 
     train_csv = pd.read_csv(os.path.join(WORKDIR, "train.csv"))
-    weird_uid = "1.2.826.0.1.3680043.8.498.93345761486297843389996628528592497280"
-    train_csv.loc[train_csv.StudyInstanceUID == weird_uid, "ETT - Abnormal"] = 0
-    train_csv.loc[train_csv.StudyInstanceUID == weird_uid, "CVC - Abnormal"] = 1
-    train_annot = pd.read_csv(os.path.join(WORKDIR, "train_annotations.csv"))
-    train_annot.loc[4344, "label"] = "CVC - Abnormal"
+    # weird_uid = "1.2.826.0.1.3680043.8.498.93345761486297843389996628528592497280"
+    # train_csv.loc[train_csv.StudyInstanceUID == weird_uid, "ETT - Abnormal"] = 0
+    # train_csv.loc[train_csv.StudyInstanceUID == weird_uid, "CVC - Abnormal"] = 1
+    # train_annot = pd.read_csv(os.path.join(WORKDIR, "train_annotations.csv"))
+    # train_annot.loc[4344, "label"] = "CVC - Abnormal"
 
     folds = train_csv.copy()
     Fold = GroupKFold(n_splits=CFG.n_fold)
@@ -291,4 +295,8 @@ if __name__ == "__main__":
     for n, (train_index, val_index) in enumerate(Fold.split(folds, folds[CFG.target_cols], groups)):
         folds.loc[val_index, "fold"] = int(n)
     folds["fold"] = folds["fold"].astype(int)
-    main(folds)
+    # main(folds)
+    for fold_idx in range(CFG.n_fold):
+        if fold_idx in CFG.trn_fold:
+            LOGGER = init_logger(f"{CFG.model_name}-f{fold_idx}.log")
+            main(folds, fold_idx)

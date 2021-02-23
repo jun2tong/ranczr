@@ -4,10 +4,10 @@ import torch.nn as nn
 import timm
 import pdb
 
-from collections import OrderedDict
+
 from torch.nn import functional as F
-from torch.cuda.amp import autocast
-from efficientnet_pytorch import EfficientNet
+
+# from efficientnet_pytorch import EfficientNet
 from custom_mod.bit_resnet import ResNetV2, get_weights
 from custom_mod.attention import CBAM
 from custom_mod.metric_head import ArcMarginHead
@@ -56,8 +56,8 @@ class MyEnsemble(nn.Module):
         super(MyEnsemble, self).__init__()
         self.model_lst = nn.ModuleList()
         for each in weight_paths:
-            model = RANCZRResNet200D()
-            model.load_state_dict(torch.load(each, map_location="cpu"))
+            model = CustomAttention("resnet200d", 11)
+            model.load_state_dict(torch.load(each, map_location="cpu")["model"])
             for param in model.parameters():
                 param.requires_grad = False
             self.model_lst.append(model)
@@ -97,27 +97,31 @@ class EffNetWLF(nn.Module):
 
     def __init__(self, model_name, target_size=11, pretrained=False):
         super().__init__()
-        if pretrained:
-            self.backbone = EfficientNet.from_pretrained(model_name)
-        else:
-            self.backbone = EfficientNet.from_name(model_name)
+        # if pretrained:
+        #     self.backbone = EfficientNet.from_pretrained(model_name)
+        # else:
+        #     self.backbone = EfficientNet.from_name(model_name)
+        self.backbone = timm.create_model(model_name, pretrained=pretrained, num_classes=target_size)
+        self.backbone.classifier = None
+        self.num_feas = 2048
+        # self.backbone._dropout = nn.Dropout(0.1)
+        # self.num_feas = self.backbone._fc.in_features
+        # self.backbone._fc = nn.Identity()
 
-        self.backbone._dropout = nn.Dropout(0.1)
-        self.num_feas = self.backbone._fc.in_features
-        self.backbone._fc = nn.Identity()
-
+        self.global_pool = nn.AdaptiveAvgPool2d(1)
         self.local_fe = CBAM(self.num_feas)
         self.dropout = nn.Dropout(0.1)
         self.classifier = nn.Linear(self.num_feas, target_size)
 
     def forward(self, image):
-        enc_feas = self.backbone.extract_features(image)
+        # enc_feas = self.backbone.extract_features(image)
+        enc_feas = self.backbone.forward_features(image)
 
         # use default's global features
         global_feas = self.local_fe(enc_feas)
-        global_feas = self.backbone._avg_pooling(global_feas)
+        global_feas = self.global_pool(global_feas)
         global_feas = global_feas.flatten(start_dim=1)
-        global_feas = self.backbone._dropout(global_feas)
+        global_feas = self.dropout(global_feas)
 
         outputs = self.classifier(global_feas)
         return outputs

@@ -72,7 +72,8 @@ def train_loop(folds, fold):
         student_model = EffNetWLF(CFG.model_name, target_size=CFG.target_size, pretrained=True)
     else:    
         student_model = CustomAttention(CFG.model_name, CFG.target_size, pretrained=True)
-    weight_path = [f"pre-trained/resnet200d/resnet200d_fold{num}.pth" for num in range(5)]
+    weight_path = [f"results/DeepAUC/resnet200d_f{num}_haug.pth" for num in range(5)]
+    # weight_path = [f"pre-trained/resnet200d/resnet200d_fold{num}.pth" for num in range(5)]
     # weight_path = [f"pre-trained/resnet200d_320.pth"]
     teacher_model = MyEnsemble(weight_path)
     LOGGER.info(f"Using {len(weight_path)} model.")
@@ -190,17 +191,17 @@ if __name__ == "__main__":
         debug = False
         num_workers = 4
         patience = 100
-        model_name = "efficientnet-b5"
-        size = 512
+        model_name = "swsl_resnext101_32x4d"
+        size = 640
         epochs = 35
         sch_step = [0.3, 0.3, 0.4]
         # lr = 0.0008
         lr = 0.0008
-        final_div_factor = 200
+        final_div_factor = 40
         # min_lr = 0.000002
-        batch_size = 16
+        batch_size = 32
         weight_decay = 1e-5
-        gradient_accumulation_steps = 2
+        gradient_accumulation_steps = 1
         max_grad_norm = 1000
         seed = 5468
         target_size = 11
