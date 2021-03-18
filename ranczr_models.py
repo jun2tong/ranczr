@@ -4,10 +4,10 @@ import torch.nn as nn
 import timm
 import pdb
 
-from collections import OrderedDict
+
 from torch.nn import functional as F
-from torch.cuda.amp import autocast
-from efficientnet_pytorch import EfficientNet
+
+# from efficientnet_pytorch import EfficientNet
 from custom_mod.bit_resnet import ResNetV2, get_weights
 from custom_mod.attention import CBAM
 from custom_mod.metric_head import ArcMarginHead
@@ -56,8 +56,8 @@ class MyEnsemble(nn.Module):
         super(MyEnsemble, self).__init__()
         self.model_lst = nn.ModuleList()
         for each in weight_paths:
-            model = RANCZRResNet200D()
-            model.load_state_dict(torch.load(each, map_location="cpu"))
+            model = CustomAttention("resnet200d", 11)
+            model.load_state_dict(torch.load(each, map_location="cpu")["model"])
             for param in model.parameters():
                 param.requires_grad = False
             self.model_lst.append(model)
@@ -97,27 +97,31 @@ class EffNetWLF(nn.Module):
 
     def __init__(self, model_name, target_size=11, pretrained=False):
         super().__init__()
-        if pretrained:
-            self.backbone = EfficientNet.from_pretrained(model_name)
-        else:
-            self.backbone = EfficientNet.from_name(model_name)
+        # if pretrained:
+        #     self.backbone = EfficientNet.from_pretrained(model_name)
+        # else:
+        #     self.backbone = EfficientNet.from_name(model_name)
+        self.backbone = timm.create_model(model_name, pretrained=pretrained, num_classes=target_size)
+        self.backbone.classifier = None
+        self.num_feas = 2048
+        # self.backbone._dropout = nn.Dropout(0.1)
+        # self.num_feas = self.backbone._fc.in_features
+        # self.backbone._fc = nn.Identity()
 
-        self.backbone._dropout = nn.Dropout(0.1)
-        self.num_feas = self.backbone._fc.in_features
-        self.backbone._fc = nn.Identity()
-
+        self.global_pool = nn.AdaptiveAvgPool2d(1)
         self.local_fe = CBAM(self.num_feas)
         self.dropout = nn.Dropout(0.1)
         self.classifier = nn.Linear(self.num_feas, target_size)
 
     def forward(self, image):
-        enc_feas = self.backbone.extract_features(image)
+        # enc_feas = self.backbone.extract_features(image)
+        enc_feas = self.backbone.forward_features(image)
 
         # use default's global features
         global_feas = self.local_fe(enc_feas)
-        global_feas = self.backbone._avg_pooling(global_feas)
+        global_feas = self.global_pool(global_feas)
         global_feas = global_feas.flatten(start_dim=1)
-        global_feas = self.backbone._dropout(global_feas)
+        global_feas = self.dropout(global_feas)
 
         outputs = self.classifier(global_feas)
         return outputs
@@ -150,3 +154,25 @@ class CustomModel(nn.Module):
         return outputs
 
 
+class CustomResNet200D(nn.Module):
+    def __init__(self, model_name='resnet200d', pretrained=False):
+        super().__init__()
+        self.model = timm.create_model(model_name, pretrained=False)
+        n_features = self.model.fc.in_features
+        # teacher and student method fine-tune
+        self.feature = nn.Sequential(*list(self.model.children())[:-2])
+        self.avg_pool = nn.AdaptiveAvgPool2d(1)
+
+        self.fc = nn.Sequential(
+            nn.Dropout(0.1), # 0.1待测试
+            nn.Linear(n_features, 11, bias=True) # 这里记得修改类别数量
+        )
+
+    def forward(self, x):
+#         x = self.model(x)
+        # teacher and student method
+        batch_size = x.size(0)
+        features = self.feature(x)
+        pooled_features = self.avg_pool(features).view(batch_size, -1)
+        x = self.fc(pooled_features)
+        return x

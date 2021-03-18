@@ -6,7 +6,7 @@ import ast
 import copy
 
 from torch.utils.data import Dataset
-from utils import reshape_img, NeedleAugmentation
+# from utils import reshape_img, NeedleAugmentation
 
 
 COLOR_MAP = {
@@ -44,6 +44,28 @@ class TrainMoCoDataset(Dataset):
             img_k = self.transform(image=image)['image']
 
         return img_q, img_k
+
+
+class PreTrainNIHDataset(Dataset):
+    def __init__(self, file_path, labels, transform=None):
+        self.file_path = file_path
+        self.transform = transform
+        self.labels = labels
+
+    def __len__(self):
+        return len(self.file_path)
+
+    def __getitem__(self, idx):
+        file_name = self.file_path[idx]
+
+        image = cv2.imread(file_name, cv2.IMREAD_GRAYSCALE)
+        image = cv2.cvtColor(image, cv2.COLOR_GRAY2RGB)
+        label = self.labels[idx]
+
+        if self.transform:
+            img = self.transform(image=image)['image']
+
+        return img, label
 
 
 class TrainDataset(Dataset):
@@ -93,8 +115,8 @@ class ValidDataset(Dataset):
         file_name = self.img_idx[idx]
         file_path = f"{self.train_path}/{file_name}.jpg"
         image = cv2.imread(file_path, cv2.IMREAD_GRAYSCALE)
-        # image = self.clahe.apply(image)
-        # image = reshape_img(image)
+        # mask = image > 0
+        # image = image[np.ix_(mask.any(1), mask.any(0))]
         image = cv2.cvtColor(image, cv2.COLOR_GRAY2RGB)
 
         if self.transform:

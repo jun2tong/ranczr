@@ -21,8 +21,8 @@ import albumentations as a_transform
 from albumentations.pytorch import ToTensorV2
 
 device = "cuda:0" if torch.cuda.is_available() else "cpu"
-WORKDIR = "../data/ranczr"
-# WORKDIR = "/home/jun/project/data/ranzcr-clip-catheter-line-classification"
+# WORKDIR = "../data/ranczr"
+WORKDIR = "/home/jun/project/data/ranzcr-clip-catheter-line-classification"
 torch.backends.cudnn.benchmark = True
 
 
@@ -151,7 +151,7 @@ def train_loop(folds, fold):
         LOGGER.info(f"Breakdown: [{avg_cls_loss:.4f}][{avg_auc_loss:.4f}]")
         LOGGER.info(f"Epoch {epoch+1} - Score: {score:.4f}  Scores: {np.round(scores, decimals=4)}")
 
-        if score > best_score:
+        if avg_val_loss < best_loss:
             update_count = 0
             if avg_val_loss < best_loss:
                 best_loss = avg_val_loss
@@ -211,19 +211,19 @@ if __name__ == "__main__":
         print_freq = 100
         num_workers = 4
         patience = 30
-        model_name = "resnet200d"
+        model_name = "inception_v3"
         backbone_name = "efficientnet-b2"
         resume = True
-        resume_path = "pre-trained/resnet200d.pth"
-        size = 640
-        epochs = 25
-        lr = 0.00003
-        # lr = 0.0001
+        resume_path = "pre-trained/inception_v3.pth"
+        size = 384
+        epochs = 30
+        # lr = 0.00003
+        lr = 0.00008
         min_lr = 0.000001
         final_div_factor = 50
-        batch_size = 16
+        batch_size = 32
         weight_decay = 1e-5
-        gradient_accumulation_steps = 2
+        gradient_accumulation_steps = 1
         max_grad_norm = 1000
         seed = 5468
         target_size = 11
@@ -241,7 +241,7 @@ if __name__ == "__main__":
             "Swan Ganz Catheter Present",
         ]
         n_fold = 5
-        trn_fold = [1]
+        trn_fold = [2]
         train = True
 
     normalize = a_transform.Normalize(
