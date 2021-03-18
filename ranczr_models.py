@@ -152,27 +152,3 @@ class CustomModel(nn.Module):
         embedding = self.emd_fc(all_feas)
         outputs = self.head(embedding)
         return outputs
-
-
-class CustomResNet200D(nn.Module):
-    def __init__(self, model_name='resnet200d', pretrained=False):
-        super().__init__()
-        self.model = timm.create_model(model_name, pretrained=False)
-        n_features = self.model.fc.in_features
-        # teacher and student method fine-tune
-        self.feature = nn.Sequential(*list(self.model.children())[:-2])
-        self.avg_pool = nn.AdaptiveAvgPool2d(1)
-
-        self.fc = nn.Sequential(
-            nn.Dropout(0.1), # 0.1待测试
-            nn.Linear(n_features, 11, bias=True) # 这里记得修改类别数量
-        )
-
-    def forward(self, x):
-#         x = self.model(x)
-        # teacher and student method
-        batch_size = x.size(0)
-        features = self.feature(x)
-        pooled_features = self.avg_pool(features).view(batch_size, -1)
-        x = self.fc(pooled_features)
-        return x

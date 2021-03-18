@@ -58,18 +58,25 @@ class DeepAUC(nn.Module):
     def __init__(self, phat):
         super(DeepAUC, self).__init__()
         self.p = phat
-        self.margin = 0.7
+        self.margin = 0.5
 
-    def forward(self, mod_out, labels, expt_a, expt_b, alpha):
+    def forward(self, mod_out, labels, ea, eb, ealpha):
 
         logits = torch.sigmoid(mod_out)
-        neg_ind = torch.relu(-1*(labels-1))
-        phat = torch.sum(labels, dim=0) / labels.shape[0]
+        with torch.no_grad():
+            neg_ind = torch.relu(-1*(labels-1))
+        # phat = torch.sum(labels, dim=0) / labels.shape[0]
+        phat = self.p
+        expt_a = torch.sum(logits*labels.float(), dim=0) / torch.sum(labels, dim=0)
+        expt_a.data[torch.isnan(expt_a.data)] = 1e-8
+        expt_b = torch.sum(logits*neg_ind.float(), dim=0) / torch.sum(neg_ind, dim=0)
+        expt_b.data[torch.isnan(expt_b.data)] = 1e-8
+        alpha = expt_b - expt_a
 
         A1 = torch.mean((1-phat)*torch.pow(logits - expt_a, 2)*labels.float(), dim=0)
         A2 = torch.mean(phat*torch.pow(logits - expt_b, 2)*neg_ind.float(), dim=0)
         cross_term = phat*(1-phat)*torch.pow(alpha,2)
-        margin_term_1 = 2*(alpha)*(phat*(1-phat)*self.margin + torch.mean(phat*logits*neg_ind.float() - (1-phat)*logits*labels.float(), dim=0))
-        # margin_term_2 = 2*(1+alpha)*torch.mean((phat*logits*neg_ind.float() - (1-phat)*logits*labels.float()), dim=0)
-        loss = torch.mean(A1 + A2 + margin_term_1 - cross_term)
+        margin_term = 2*(1+alpha)*(phat*(1-phat)*self.margin + torch.mean(phat*logits*neg_ind.float() - (1-phat)*logits*labels.float(), dim=0))
+        # square_term = 2*(1+alpha)*torch.mean((phat*logits*neg_ind.float() - (1-phat)*logits*labels.float()), dim=0)
+        loss = torch.mean(A1 + A2 + margin_term - cross_term)
         return loss
